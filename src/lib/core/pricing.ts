@@ -12,6 +12,10 @@ export interface ModelInfo {
   outputPerMtok: number;
   contextWindow: number;
   maxOutput: number;
+  /** Supports thinking: {type: "adaptive"} (4.6+ models; Haiku 4.5 does not). */
+  adaptiveThinking: boolean;
+  /** Supports output_config.effort (errors on Haiku 4.5). */
+  effort: boolean;
 }
 
 export const MODELS = {
@@ -21,6 +25,8 @@ export const MODELS = {
     outputPerMtok: 25,
     contextWindow: 1_000_000,
     maxOutput: 128_000,
+    adaptiveThinking: true,
+    effort: true,
   },
   "claude-sonnet-5": {
     provider: PROVIDER,
@@ -28,6 +34,8 @@ export const MODELS = {
     outputPerMtok: 10, // intro pricing through 2026-08-31 (then 15)
     contextWindow: 1_000_000,
     maxOutput: 128_000,
+    adaptiveThinking: true,
+    effort: true,
   },
   "claude-haiku-4-5": {
     provider: PROVIDER,
@@ -35,6 +43,8 @@ export const MODELS = {
     outputPerMtok: 5,
     contextWindow: 200_000,
     maxOutput: 64_000,
+    adaptiveThinking: false,
+    effort: false,
   },
 } as const satisfies Record<string, ModelInfo>;
 

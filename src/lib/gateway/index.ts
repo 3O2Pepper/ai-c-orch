@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
-import type { ModelId, Usage } from "@/lib/core/pricing";
+import { MODELS, type ModelId, type Usage } from "@/lib/core/pricing";
 import { logModelCall } from "./log";
 
 // The ONLY path to a model. Every call is metered into model_calls (and
@@ -45,6 +45,15 @@ export interface ObjectResult<T> {
   object: T;
   usage: Usage;
   costUsd: number;
+}
+
+/** Thinking/effort params only for models that accept them (Haiku 4.5 rejects both). */
+function tuningParams(model: ModelId, effort: Effort) {
+  const caps = MODELS[model];
+  return {
+    ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
+    ...(caps.effort ? { output_config: { effort } } : {}),
+  };
 }
 
 function toUsage(u: Anthropic.Usage): Usage {
@@ -99,8 +108,7 @@ export async function generateText(call: BaseCall): Promise<TextResult> {
     const stream = getClient().messages.stream({
       model: call.model,
       max_tokens: call.maxTokens ?? 16000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: call.effort ?? "high" },
+      ...tuningParams(call.model, call.effort ?? "high"),
       ...(call.system ? { system: call.system } : {}),
       messages: [{ role: "user", content: call.prompt }],
     });
@@ -123,12 +131,13 @@ export async function generateObject<S extends z.ZodType>(
   call: BaseCall & { schema: S },
 ): Promise<ObjectResult<z.infer<S>>> {
   const { result, usage, costUsd } = await metered(call, async () => {
+    const caps = MODELS[call.model];
     const response = await getClient().messages.parse({
       model: call.model,
       max_tokens: call.maxTokens ?? 16000,
-      thinking: { type: "adaptive" },
+      ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
       output_config: {
-        effort: call.effort ?? "high",
+        ...(caps.effort ? { effort: call.effort ?? "high" } : {}),
         format: zodOutputFormat(call.schema),
       },
       ...(call.system ? { system: call.system } : {}),
