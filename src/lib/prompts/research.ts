@@ -6,10 +6,20 @@ import type { Outline, ProjectSpec } from "@/lib/core/spec";
 export const OUTLINE_SYSTEM = `You are the planning analyst for a research \
 report. Produce a section outline that fully covers the project's goal and \
 success criteria. 4-8 sections, each with concrete notes on what it must \
-cover. Do not include generic filler sections.`;
+cover. Do not include generic filler sections.
 
-export function outlinePrompt(spec: ProjectSpec): string {
-  return `Project spec:\n${JSON.stringify(spec, null, 2)}\n\nProduce the section outline.`;
+blocking_question rule: set it ONLY if a material ambiguity would change the \
+report's structure or conclusions AND no reasonable assumption exists. When \
+in doubt, resolve by assumption and leave it null — most projects need no \
+question. If you do ask, provide a recommended_default the system can \
+proceed with unattended.`;
+
+export function outlinePrompt(spec: ProjectSpec, decision?: string | null): string {
+  return [
+    `Project spec:\n${JSON.stringify(spec, null, 2)}`,
+    ...(decision ? [`User decision on the open question:\n${decision}`] : []),
+    `Produce the section outline.`,
+  ].join("\n\n");
 }
 
 export const DRAFT_SYSTEM = `You are the research writer for AI Project \
@@ -25,11 +35,44 @@ Rules:
 - Honor every constraint and aim every section at the success criteria.
 - Record the spec's assumptions in a short "Assumptions" section at the end.`;
 
-export function draftPrompt(spec: ProjectSpec, outline: Outline): string {
+export function draftPrompt(
+  spec: ProjectSpec,
+  outline: Outline,
+  decision?: string | null,
+): string {
   return [
     `Project spec:\n${JSON.stringify(spec, null, 2)}`,
-    `Approved outline:\n${JSON.stringify(outline, null, 2)}`,
+    `Approved outline:\n${JSON.stringify(outline.sections, null, 2)}`,
+    ...(decision
+      ? [
+          `User decision (recorded at the needs-input gate — honor it):\n${decision}`,
+        ]
+      : []),
     `Write the full report now.`,
+  ].join("\n\n");
+}
+
+export const REVISION_SYSTEM = `You are revising an existing markdown \
+research report based on a user's revision request.
+
+Rules:
+- Apply the requested changes fully; keep everything else intact unless the
+  request implies otherwise.
+- Return the COMPLETE revised report, not a diff or the changed sections.
+- Keep the original structure, tone, and formatting conventions.
+- You have no web access. Where new content requires facts you are unsure
+  of, say so inline rather than inventing precision.`;
+
+export function revisionPrompt(
+  spec: ProjectSpec,
+  previousReport: string,
+  instructions: string,
+): string {
+  return [
+    `Project spec:\n${JSON.stringify(spec, null, 2)}`,
+    `Current report:\n---\n${previousReport}\n---`,
+    `Revision request from the user:\n${instructions}`,
+    `Return the complete revised report.`,
   ].join("\n\n");
 }
 

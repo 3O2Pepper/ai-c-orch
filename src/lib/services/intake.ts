@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db/client";
 import { projects, projectSpecs } from "@/lib/db/schema";
 import { generateObject } from "@/lib/gateway";
 import { INTAKE_SYSTEM, intakePrompt } from "@/lib/prompts/intake";
+import { createApproval } from "./approvals";
 import { appendEvent } from "./events";
 import { applyProjectTransition } from "./state";
 
@@ -67,6 +68,10 @@ export async function createProjectFromRequest(
     });
 
     await applyProjectTransition(project.id, "specifying", { type: "spec_ready" });
+    await createApproval(project.id, "plan", {
+      specVersion: 1,
+      title: spec.title,
+    });
     return { projectId: project.id, spec };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);

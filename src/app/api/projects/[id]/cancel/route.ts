@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { inngest, projectCancelled } from "@/inngest/client";
 import type { ProjectState } from "@/lib/core/states";
 import { TransitionError } from "@/lib/core/transitions";
 import { getDevUserId } from "@/lib/db/dev-user";
 import { forUser } from "@/lib/db/queries";
+import { resolveApproval } from "@/lib/services/approvals";
 import { applyProjectTransition, StateRaceError } from "@/lib/services/state";
 
 export async function POST(
@@ -22,6 +24,14 @@ export async function POST(
       project.state as ProjectState,
       { type: "cancelled" },
     );
+
+    // Close any open gate and kill the durable run (cancelOn)
+    const approval = await forUser(userId).getPendingApproval(project.id);
+    if (approval) {
+      await resolveApproval(project.id, approval.id, "rejected", "Project cancelled");
+    }
+    await inngest.send(projectCancelled.create({ projectId: project.id }));
+
     return NextResponse.json({ state });
   } catch (err) {
     if (err instanceof StateRaceError || err instanceof TransitionError) {
