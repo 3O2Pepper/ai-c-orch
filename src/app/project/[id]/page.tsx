@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ApprovalPanel } from "@/components/approval-panel";
 import { ArtifactPreview } from "@/components/artifact-preview";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { CostMeter } from "@/components/cost-meter";
 import { EventLog } from "@/components/event-log";
 import { PhaseTimeline } from "@/components/phase-timeline";
 import { StateBadge } from "@/components/state-badge";
+import { ProjectSpecSchema } from "@/lib/core/spec";
 import { isTerminal, type ProjectState } from "@/lib/core/states";
 import { getDevUserId } from "@/lib/db/dev-user";
 import { forUser } from "@/lib/db/queries";
@@ -32,6 +34,13 @@ export default async function ProjectPage({
   const latestArtifact = artifacts[0] ?? null;
   const state = project.state as ProjectState;
 
+  let pendingSpec = null;
+  if (state === "awaiting_plan_approval") {
+    const specRow = await q.getLatestSpec(id);
+    const parsed = specRow ? ProjectSpecSchema.safeParse(specRow.spec) : null;
+    pendingSpec = parsed?.success ? parsed.data : null;
+  }
+
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-8">
       <AutoRefresh active={!isTerminal(state)} />
@@ -49,6 +58,8 @@ export default async function ProjectPage({
           budgetUsd={Number(project.budgetUsd)}
         />
       </header>
+
+      {pendingSpec && <ApprovalPanel projectId={project.id} spec={pendingSpec} />}
 
       {state === "failed" && (
         <p className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
