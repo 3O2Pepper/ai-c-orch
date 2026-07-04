@@ -5,6 +5,7 @@ import { ArtifactPreview } from "@/components/artifact-preview";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { CostMeter } from "@/components/cost-meter";
 import { EventLog } from "@/components/event-log";
+import { ModelCallsTable } from "@/components/model-calls-table";
 import { PhaseTimeline } from "@/components/phase-timeline";
 import { StateBadge } from "@/components/state-badge";
 import { ProjectSpecSchema } from "@/lib/core/spec";
@@ -26,10 +27,11 @@ export default async function ProjectPage({
   const project = await q.getProject(id);
   if (!project) notFound();
 
-  const [phases, artifacts, events] = await Promise.all([
+  const [phases, artifacts, events, modelCalls] = await Promise.all([
     q.listPhases(id),
     q.listArtifacts(id),
     q.listEvents(id),
+    q.listModelCalls(id),
   ]);
   const latestArtifact = artifacts[0] ?? null;
   const state = project.state as ProjectState;
@@ -90,6 +92,13 @@ export default async function ProjectPage({
           <EventLog events={events} />
         </section>
       </div>
+
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Model calls
+        </h2>
+        <ModelCallsTable calls={modelCalls} />
+      </section>
     </main>
   );
 }
