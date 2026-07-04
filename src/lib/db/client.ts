@@ -7,19 +7,35 @@
  */
 import { neon } from "@neondatabase/serverless";
 import { and, eq, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/neon-http";
+import { drizzle, type NeonHttpDatabase } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
-
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is not set (copy .env.example to .env.local)");
-}
-
-export const db = drizzle(neon(process.env.DATABASE_URL), { schema });
-
-export type Db = typeof db;
 
 /** Stable UUID for the single seeded dev user (see seed.ts). */
 export const DEV_USER_ID = "00000000-0000-4000-8000-000000000001";
+
+let _db: NeonHttpDatabase<typeof schema> | undefined;
+
+function getDb(): NeonHttpDatabase<typeof schema> {
+  if (!_db) {
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      throw new Error(
+        "DATABASE_URL is not set (copy .env.example to .env.local)",
+      );
+    }
+    _db = drizzle(neon(url), { schema });
+  }
+  return _db;
+}
+
+/** Lazy proxy so importing this module does not require DATABASE_URL at build time. */
+export const db = new Proxy({} as NeonHttpDatabase<typeof schema>, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getDb(), prop, receiver);
+  },
+});
+
+export type Db = typeof db;
 
 export async function getCurrentUserId(): Promise<string> {
   return DEV_USER_ID;
@@ -37,7 +53,7 @@ export function scopedProjects(userId: string) {
     userId,
 
     async list() {
-      return db
+      return getDb()
         .select()
         .from(schema.projects)
         .where(eq(schema.projects.userId, userId))
@@ -45,7 +61,7 @@ export function scopedProjects(userId: string) {
     },
 
     async get(projectId: string) {
-      const rows = await db
+      const rows = await getDb()
         .select()
         .from(schema.projects)
         .where(owned(projectId))
@@ -72,7 +88,7 @@ export function scopedProjects(userId: string) {
       expected: string,
       next: string,
     ): Promise<boolean> {
-      const rows = await db
+      const rows = await getDb()
         .update(schema.projects)
         .set({ state: next, updatedAt: new Date() })
         .where(and(owned(projectId), eq(schema.projects.state, expected)))
@@ -101,10 +117,12 @@ export async function transitionPhaseState(
     modelUsed: string;
   }> = {},
 ): Promise<boolean> {
-  const rows = await db
+  const rows = await getDb()
     .update(schema.phases)
     .set({ state: next, updatedAt: new Date(), ...extra })
-    .where(and(eq(schema.phases.id, phaseId), eq(schema.phases.state, expected)))
+    .where(
+      and(eq(schema.phases.id, phaseId), eq(schema.phases.state, expected)),
+    )
     .returning({ id: schema.phases.id });
   return rows.length === 1;
 }
