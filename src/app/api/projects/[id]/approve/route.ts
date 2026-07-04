@@ -3,9 +3,11 @@ import type { ProjectState } from "@/lib/core/states";
 import { TransitionError } from "@/lib/core/transitions";
 import { getDevUserId } from "@/lib/db/dev-user";
 import { forUser } from "@/lib/db/queries";
+import { runProject } from "@/lib/services/runner";
 import { applyProjectTransition, StateRaceError } from "@/lib/services/state";
 
-// Gate 1 (plan approval). The runner trigger is wired in Commit 7.
+// Gate 1 (plan approval). Approval triggers the Phase 1 runner in-process
+// (fire-and-forget; the runner handles its own failure transition).
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -23,6 +25,9 @@ export async function POST(
       project.state as ProjectState,
       { type: "plan_approved" },
     );
+    runProject(project.id).catch((err) => {
+      console.error(`run failed for project ${project.id}:`, err);
+    });
     return NextResponse.json({ state });
   } catch (err) {
     if (err instanceof StateRaceError || err instanceof TransitionError) {

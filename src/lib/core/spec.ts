@@ -48,6 +48,17 @@ export const WorkflowPlanSchema = z.object({
 
 export type WorkflowPlan = z.infer<typeof WorkflowPlanSchema>;
 
+export const OutlineSchema = z.object({
+  sections: z.array(
+    z.object({
+      heading: z.string(),
+      notes: z.string().describe("What this section must cover"),
+    }),
+  ),
+});
+
+export type Outline = z.infer<typeof OutlineSchema>;
+
 export const PhaseResultSchema = z.object({
   output_summary: z.string(),
 });
