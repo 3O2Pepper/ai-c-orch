@@ -38,8 +38,10 @@ export const projects = pgTable("projects", {
   rawRequest: text("raw_request").notNull(), // original messy input, immutable
   state: text("state").notNull(), // ProjectState — transitions via conditional UPDATE only
   workflowTemplate: text("workflow_template"), // 'research' only in Phase 1
-  budgetUsd: numeric("budget_usd").notNull().default("5"),
-  spentUsd: numeric("spent_usd").notNull().default("0"), // rolled up by the gateway
+  budgetUsd: numeric("budget_usd", { precision: 12, scale: 6 }).notNull().default("5"),
+  // rolled up by the gateway; scale 6 = micro-dollar resolution, plenty for
+  // per-token costs while keeping a defined rounding behavior
+  spentUsd: numeric("spent_usd", { precision: 12, scale: 6 }).notNull().default("0"),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   ...timestamps,
 });
@@ -102,7 +104,7 @@ export const modelCalls = pgTable("model_calls", {
   outputTokens: integer("output_tokens"),
   cacheReadInputTokens: integer("cache_read_input_tokens"),
   cacheCreationInputTokens: integer("cache_creation_input_tokens"),
-  costUsd: numeric("cost_usd").notNull(),
+  costUsd: numeric("cost_usd", { precision: 12, scale: 6 }).notNull(),
   latencyMs: integer("latency_ms"),
   status: text("status").notNull(), // 'ok' | 'error'
   error: text("error"),

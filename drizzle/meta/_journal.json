@@ -8,6 +8,13 @@
       "when": 1783142392969,
       "tag": "0000_flowery_terrax",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783187274408,
+      "tag": "0001_silent_sleepwalker",
+      "breakpoints": true
     }
   ]
 }
