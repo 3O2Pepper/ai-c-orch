@@ -1,12 +1,14 @@
-// State machine values. Phase 1 uses the subset below; [Later] states
-// (clarifying, needs_input, paused, verifying, fixing) arrive with their
-// features in Phases 2-4 — do not add them before then.
+// State machine values. Phase 2 added needs_input (consequential-decision
+// gate) and paused (budget gate). [Later] states (clarifying, verifying,
+// fixing) arrive with their features in Phases 3-4 — do not add them early.
 
 export const PROJECT_STATES = [
   "draft",
   "specifying",
   "awaiting_plan_approval",
   "running",
+  "needs_input",
+  "paused",
   "review",
   "done",
   "failed",
@@ -25,6 +27,8 @@ export const ACTIVE_PROJECT_STATES: readonly ProjectState[] = [
   "specifying",
   "awaiting_plan_approval",
   "running",
+  "needs_input",
+  "paused",
   "review",
 ];
 

@@ -18,4 +18,5 @@ export const PHASE_MODEL_ROUTES: Record<PhaseType, PhaseRoute> = {
   outline: { model: "claude-opus-4-8", effort: "medium", maxTokens: 4000 },
   draft: { model: "claude-opus-4-8", effort: "high", maxTokens: 32000 },
   digest: { model: "claude-haiku-4-5", effort: "low", maxTokens: 512 },
+  revision: { model: "claude-sonnet-5", effort: "high", maxTokens: 32000 },
 };

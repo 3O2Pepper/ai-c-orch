@@ -8,7 +8,12 @@ export type ProjectEvent =
   | { type: "intake_started" } // draft -> specifying
   | { type: "spec_ready" } // specifying -> awaiting_plan_approval
   | { type: "plan_approved" } // awaiting_plan_approval -> running
+  | { type: "input_requested" } // running -> needs_input (consequential-decision gate)
+  | { type: "input_provided" } // needs_input -> running
+  | { type: "budget_exceeded" } // running -> paused (budget gate)
+  | { type: "resumed" } // paused -> running
   | { type: "run_completed" } // running -> review
+  | { type: "revision_requested" } // review -> running (revision loop)
   | { type: "delivery_accepted" } // review -> done
   | { type: "run_failed"; reason: string } // any active -> failed
   | { type: "cancelled" }; // any active -> cancelled
@@ -37,8 +42,23 @@ export function transition(from: ProjectState, event: ProjectEvent): ProjectStat
     case "plan_approved":
       if (from === "awaiting_plan_approval") return "running";
       throw new TransitionError(from, event.type);
+    case "input_requested":
+      if (from === "running") return "needs_input";
+      throw new TransitionError(from, event.type);
+    case "input_provided":
+      if (from === "needs_input") return "running";
+      throw new TransitionError(from, event.type);
+    case "budget_exceeded":
+      if (from === "running") return "paused";
+      throw new TransitionError(from, event.type);
+    case "resumed":
+      if (from === "paused") return "running";
+      throw new TransitionError(from, event.type);
     case "run_completed":
       if (from === "running") return "review";
+      throw new TransitionError(from, event.type);
+    case "revision_requested":
+      if (from === "review") return "running";
       throw new TransitionError(from, event.type);
     case "delivery_accepted":
       if (from === "review") return "done";

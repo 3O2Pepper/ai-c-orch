@@ -29,10 +29,37 @@ describe("project transitions", () => {
     }
   });
 
+  it("walks the needs_input gate (running <-> needs_input)", () => {
+    expect(transition("running", { type: "input_requested" })).toBe("needs_input");
+    expect(transition("needs_input", { type: "input_provided" })).toBe("running");
+  });
+
+  it("walks the budget gate (running <-> paused)", () => {
+    expect(transition("running", { type: "budget_exceeded" })).toBe("paused");
+    expect(transition("paused", { type: "resumed" })).toBe("running");
+  });
+
+  it("walks the revision loop (review -> running -> review)", () => {
+    let s = transition("review", { type: "revision_requested" });
+    expect(s).toBe("running");
+    s = transition(s, { type: "run_completed" });
+    expect(s).toBe("review");
+    expect(transition(s, { type: "delivery_accepted" })).toBe("done");
+  });
+
   it("rejects illegal transitions", () => {
     expect(() => transition("draft", { type: "plan_approved" })).toThrow(TransitionError);
     expect(() => transition("running", { type: "spec_ready" })).toThrow(TransitionError);
     expect(() => transition("review", { type: "run_completed" })).toThrow(TransitionError);
+    expect(() => transition("running", { type: "input_provided" })).toThrow(TransitionError);
+    expect(() => transition("needs_input", { type: "input_requested" })).toThrow(
+      TransitionError,
+    );
+    expect(() => transition("running", { type: "resumed" })).toThrow(TransitionError);
+    expect(() => transition("running", { type: "revision_requested" })).toThrow(
+      TransitionError,
+    );
+    expect(() => transition("paused", { type: "run_completed" })).toThrow(TransitionError);
   });
 
   it("rejects any event from a terminal state", () => {
