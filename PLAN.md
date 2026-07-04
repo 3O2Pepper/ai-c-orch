@@ -269,9 +269,11 @@ API constraints baked into the gateway:
 
 ## 8. Phase 2–4 map (unchanged intent, one-line each) [Later]
 
-- **P2 — engine + gates:** Inngest inside Next.js; full state machines with durable
-  `waitForEvent`; `approvals` + `messages` tables; needs_input + delivery gates; revision
-  loop; budget tracking + budget gate; first deploy.
+- **P2 — engine + gates (BUILT):** Inngest inside Next.js; full state machines with
+  durable `waitForEvent`; `approvals` + `messages` tables; needs_input + delivery gates;
+  revision loop (max 10 rounds); budget gate. Gate dwell: 7 days — needs_input expires
+  to the recommended default; budget expiry cancels. Deploy remains a manual step
+  (Vercel + Inngest Cloud) when wanted; local dev uses `npm run dev:inngest`.
 - **P3 — router + tools + templates:** router config table + fallbacks; web search;
   E2B sandbox; Build + Analyze templates; `context_items` service (pinned spec/decisions,
   digests, rolling summary, token budgets); R2 artifact storage; artifact versioning UI.
