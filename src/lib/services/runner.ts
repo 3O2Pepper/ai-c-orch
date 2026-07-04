@@ -1,4 +1,5 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
+import { PHASE_MODEL_ROUTES } from "@/lib/core/routes";
 import {
   OutlineSchema,
   ProjectSpecSchema,
@@ -34,9 +35,22 @@ function slugify(title: string): string {
   );
 }
 
-export async function runProject(projectId: string): Promise<void> {
+export async function runProject(projectId: string, userId: string): Promise<void> {
   const db = getDb();
   let currentPhase: { id: string } | null = null;
+
+  // Re-verify ownership at the trust boundary: every child write below
+  // (phases, artifacts, events, model calls) descends from this check, so
+  // the userId seam survives even if a future caller forgets to scope
+  // (PLAN §9 tenant isolation).
+  const [owned] = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+    .limit(1);
+  if (!owned) {
+    throw new Error(`Project ${projectId} not found for user ${userId}`);
+  }
 
   try {
     const [specRow] = await db
@@ -69,16 +83,17 @@ export async function runProject(projectId: string): Promise<void> {
     await applyPhaseTransition(projectId, outlinePhase.id, "pending", {
       type: "phase_started",
     });
+    const outlineRoute = PHASE_MODEL_ROUTES.outline;
     const outlineResult = await generateObject({
       projectId,
       phaseId: outlinePhase.id,
-      purpose: "synthesis_outline",
-      model: "claude-opus-4-8",
+      purpose: "outline",
+      model: outlineRoute.model,
       system: OUTLINE_SYSTEM,
       prompt: outlinePrompt(spec),
       schema: OutlineSchema,
-      maxTokens: 4000,
-      effort: "medium",
+      maxTokens: outlineRoute.maxTokens,
+      effort: outlineRoute.effort,
     });
     const outline: Outline = outlineResult.object;
     await db
@@ -87,7 +102,7 @@ export async function runProject(projectId: string): Promise<void> {
         outputSummary: `${outline.sections.length} sections: ${outline.sections
           .map((s) => s.heading)
           .join("; ")}`,
-        modelUsed: "claude-opus-4-8",
+        modelUsed: outlineRoute.model,
         attempts: 1,
       })
       .where(eq(phases.id, outlinePhase.id));
@@ -100,35 +115,37 @@ export async function runProject(projectId: string): Promise<void> {
     await applyPhaseTransition(projectId, draftPhase.id, "pending", {
       type: "phase_started",
     });
+    const draftRoute = PHASE_MODEL_ROUTES.draft;
     const draftResult = await generateText({
       projectId,
       phaseId: draftPhase.id,
-      purpose: "synthesis_draft",
-      model: "claude-opus-4-8",
+      purpose: "draft",
+      model: draftRoute.model,
       system: DRAFT_SYSTEM,
       prompt: draftPrompt(spec, outline),
-      maxTokens: 32000,
-      effort: "high",
+      maxTokens: draftRoute.maxTokens,
+      effort: draftRoute.effort,
     });
     await db
       .update(phases)
       .set({
         outputSummary: `Drafted ${draftResult.text.length} chars`,
-        modelUsed: "claude-opus-4-8",
+        modelUsed: draftRoute.model,
         attempts: 1,
       })
       .where(eq(phases.id, draftPhase.id));
 
     // Artifact digest (cheap tier) for future context assembly
+    const digestRoute = PHASE_MODEL_ROUTES.digest;
     const digestResult = await generateText({
       projectId,
       phaseId: draftPhase.id,
-      purpose: "summarize_digest",
-      model: "claude-haiku-4-5",
+      purpose: "digest",
+      model: digestRoute.model,
       system: DIGEST_SYSTEM,
       prompt: draftResult.text,
-      maxTokens: 512,
-      effort: "low",
+      maxTokens: digestRoute.maxTokens,
+      effort: digestRoute.effort,
     });
 
     const filename = `${slugify(spec.title)}.md`;

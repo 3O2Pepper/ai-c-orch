@@ -4,8 +4,16 @@ import { z } from "zod";
 // the runner, and the UI. Kept free of numeric/string constraints that the
 // structured-outputs API doesn't enforce server-side.
 
+// Phase 1 produces markdown research reports ONLY. "spreadsheet" and "code"
+// are [Later] deliverable kinds (Phase 3 Analyze/Build templates) — they are
+// deliberately excluded from the schema so neither the intake model (the
+// structured-outputs schema is enforced server-side) nor a user edit can
+// select them before the templates exist.
+export const DELIVERABLE_KINDS = ["report"] as const;
+export const LATER_DELIVERABLE_KINDS = ["spreadsheet", "code"] as const; // [Later: P3]
+
 export const DeliverableSchema = z.object({
-  kind: z.enum(["report", "spreadsheet", "code"]),
+  kind: z.enum(DELIVERABLE_KINDS),
   description: z.string(),
 });
 
@@ -25,13 +33,10 @@ export const ProjectSpecSchema = z.object({
 
 export type ProjectSpec = z.infer<typeof ProjectSpecSchema>;
 
-export const PHASE_TYPES = [
-  "spec_extraction",
-  "planning",
-  "synthesis_outline",
-  "synthesis_draft",
-  "summarize_digest",
-] as const;
+// Phase 1 phase types, aligned with PLAN.md §6. Multi-template types
+// (planning, research_gather, implement_code, critique, revision, ...)
+// arrive with their templates in Phases 2-4.
+export const PHASE_TYPES = ["spec_extraction", "outline", "draft", "digest"] as const;
 
 export type PhaseType = (typeof PHASE_TYPES)[number];
 
@@ -69,7 +74,7 @@ export type PhaseResult = z.infer<typeof PhaseResultSchema>;
 export const RESEARCH_PLAN: WorkflowPlan = {
   template: "research",
   phases: [
-    { idx: 0, name: "Outline", phase_type: "synthesis_outline" },
-    { idx: 1, name: "Draft report", phase_type: "synthesis_draft" },
+    { idx: 0, name: "Outline", phase_type: "outline" },
+    { idx: 1, name: "Draft report", phase_type: "draft" },
   ],
 };

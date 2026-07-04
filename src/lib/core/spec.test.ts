@@ -15,17 +15,21 @@ describe("ProjectSpecSchema", () => {
     expect(spec.deliverables[0].kind).toBe("report");
   });
 
-  it("rejects unknown deliverable kinds", () => {
-    const result = ProjectSpecSchema.safeParse({
-      title: "x",
-      goal: "y",
-      deliverables: [{ kind: "video", description: "nope" }],
-      constraints: [],
-      success_criteria: [],
-      assumptions: [],
-      blocking_questions: [],
-    });
-    expect(result.success).toBe(false);
+  it("rejects non-report deliverable kinds in Phase 1", () => {
+    // "spreadsheet" and "code" are [Later] kinds (Phase 3 templates) and
+    // must not be selectable before those templates exist.
+    for (const kind of ["spreadsheet", "code", "video"]) {
+      const result = ProjectSpecSchema.safeParse({
+        title: "x",
+        goal: "y",
+        deliverables: [{ kind, description: "nope" }],
+        constraints: [],
+        success_criteria: [],
+        assumptions: [],
+        blocking_questions: [],
+      });
+      expect(result.success).toBe(false);
+    }
   });
 });
 

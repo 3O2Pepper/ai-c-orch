@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
+import { PHASE_MODEL_ROUTES } from "@/lib/core/routes";
 import { ProjectSpecSchema, type ProjectSpec } from "@/lib/core/spec";
 import { getDb } from "@/lib/db/client";
 import { projects, projectSpecs } from "@/lib/db/schema";
@@ -78,14 +79,15 @@ export async function createProjectFromRequest(
 }
 
 function extractSpec(projectId: string, rawRequest: string) {
+  const route = PHASE_MODEL_ROUTES.spec_extraction;
   return generateObject({
     projectId,
     purpose: "spec_extraction",
-    model: "claude-sonnet-5",
+    model: route.model,
     system: INTAKE_SYSTEM,
     prompt: intakePrompt(rawRequest),
     schema: ProjectSpecSchema,
-    maxTokens: 4000,
-    effort: "medium",
+    maxTokens: route.maxTokens,
+    effort: route.effort,
   });
 }

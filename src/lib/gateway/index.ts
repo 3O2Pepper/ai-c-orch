@@ -1,8 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
-import { MODELS, type ModelId, type Usage } from "@/lib/core/pricing";
+import { MODELS, type Effort, type ModelId, type Usage } from "@/lib/core/pricing";
 import { logModelCall } from "./log";
+
+export type { Effort };
 
 // The ONLY path to a model. Every call is metered into model_calls (and
 // projects.spent_usd) before its result propagates — success or failure.
@@ -21,8 +23,6 @@ function getClient(): Anthropic {
   }
   return client;
 }
-
-export type Effort = "low" | "medium" | "high";
 
 interface BaseCall {
   projectId: string;

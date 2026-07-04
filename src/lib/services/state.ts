@@ -21,6 +21,11 @@ export class StateRaceError extends Error {
 // INSERT commit together or not at all. The neon-http driver has no
 // interactive transactions, so single-statement atomicity is the mechanism
 // (same pattern as the gateway's metering rollup).
+//
+// Scoping invariant: transitions take a projectId whose ownership has
+// already been verified by the caller — API routes check via forUser(),
+// intake creates the project, and the runner re-verifies at entry. Never
+// call these with a projectId taken directly from user input.
 
 /**
  * Compute the next project state via the pure transition function, then

@@ -205,17 +205,21 @@ Rules (enforced now, they're free):
 
 ## 6. Model registry (current as of 2026-07-02)
 
-One source of truth in `lib/core/pricing.ts`, consumed by the gateway (cost calc) and
-later by the router (Phase 3) and plan-card estimates (Phase 4).
+One source of truth: capability/pricing in `lib/core/pricing.ts`; the phase-type →
+model mapping in `lib/core/routes.ts` (consumed by intake and the runner; becomes the
+seed data for the Phase 3 router and Phase 4 plan-card estimates).
+
+Phase 1 phase types are `spec_extraction`, `outline`, `draft`, `digest`.
 
 | Route (phase_type) | Model | $/Mtok in/out | Notes |
 |---|---|---|---|
 | spec_extraction | `claude-sonnet-5` | 3 / 15 (intro 2 / 10 thru 2026-08-31) | structured outputs |
-| planning | `claude-opus-4-8` | 5 / 25 | adaptive thinking |
+| outline | `claude-opus-4-8` | 5 / 25 | structured outputs, adaptive thinking |
+| draft | `claude-opus-4-8` | 5 / 25 | streamed |
+| digest | `claude-haiku-4-5` | 1 / 5 | no adaptive thinking/effort (pre-4.6 model) |
+| planning **[P3]** | `claude-opus-4-8` | — | LLM-parameterized plans |
 | research_gather **[P3]** | `claude-sonnet-5` | — | + web_search tool |
-| synthesis_draft | `claude-opus-4-8` | 5 / 25 | |
 | implement_code / debug_fix / xlsx_build **[P3]** | `claude-sonnet-5` | — | + sandbox |
-| summarize_digest | `claude-haiku-4-5` | 1 / 5 | |
 | critique **[P4]** | `claude-opus-4-8` | — | |
 | revision **[P2]** | `claude-sonnet-5` | — | was missing from the original router table |
 

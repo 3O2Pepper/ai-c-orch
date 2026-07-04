@@ -25,7 +25,7 @@ export async function POST(
       project.state as ProjectState,
       { type: "plan_approved" },
     );
-    runProject(project.id).catch((err) => {
+    runProject(project.id, userId).catch((err) => {
       console.error(`run failed for project ${project.id}:`, err);
     });
     return NextResponse.json({ state });

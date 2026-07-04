@@ -50,6 +50,9 @@ export const MODELS = {
 
 export type ModelId = keyof typeof MODELS;
 
+/** Depth control for models that support output_config.effort. */
+export type Effort = "low" | "medium" | "high";
+
 export interface Usage {
   inputTokens: number;
   outputTokens: number;
