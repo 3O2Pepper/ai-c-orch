@@ -15,6 +15,13 @@
       "when": 1783187274408,
       "tag": "0001_silent_sleepwalker",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783203204535,
+      "tag": "0002_living_iceman",
+      "breakpoints": true
     }
   ]
 }

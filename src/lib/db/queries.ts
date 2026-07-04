@@ -1,6 +1,15 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "./client";
-import { artifacts, events, modelCalls, phases, projects, projectSpecs } from "./schema";
+import {
+  approvals,
+  artifacts,
+  events,
+  messages,
+  modelCalls,
+  phases,
+  projects,
+  projectSpecs,
+} from "./schema";
 
 // Every read goes through here and is scoped by userId — the tenant-isolation
 // seam PLAN.md §9 requires even while there is a single user. Project-child
@@ -76,6 +85,28 @@ export function forUser(userId: string) {
         .from(modelCalls)
         .where(eq(modelCalls.projectId, projectId))
         .orderBy(asc(modelCalls.createdAt));
+    },
+
+    async getPendingApproval(projectId: string) {
+      if (!(await requireProject(projectId))) return null;
+      const [approval] = await db
+        .select()
+        .from(approvals)
+        .where(
+          and(eq(approvals.projectId, projectId), eq(approvals.status, "pending")),
+        )
+        .orderBy(desc(approvals.createdAt))
+        .limit(1);
+      return approval ?? null;
+    },
+
+    async listMessages(projectId: string) {
+      if (!(await requireProject(projectId))) return [];
+      return db
+        .select()
+        .from(messages)
+        .where(eq(messages.projectId, projectId))
+        .orderBy(asc(messages.createdAt));
     },
   };
 }

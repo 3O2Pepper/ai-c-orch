@@ -9,9 +9,8 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-// Phase 1 subset of the PLAN.md §4 schema. [Later] tables (api_keys,
-// context_items, approvals, messages) are added with their features in
-// Phases 2-4 — do not create them early.
+// PLAN.md §4 schema. Phase 2 added approvals + messages (durable gates and
+// the composer). Still [Later]: api_keys (P4), context_items (P3).
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -108,6 +107,31 @@ export const modelCalls = pgTable("model_calls", {
   latencyMs: integer("latency_ms"),
   status: text("status").notNull(), // 'ok' | 'error'
   error: text("error"),
+  ...timestamps,
+});
+
+export const approvals = pgTable("approvals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id),
+  phaseId: uuid("phase_id").references(() => phases.id),
+  gate: text("gate").notNull(), // 'plan' | 'needs_input' | 'budget' | 'delivery'
+  payload: jsonb("payload"), // what's being approved (question, budget figures, artifact ref)
+  status: text("status").notNull().default("pending"), // 'pending' | 'approved' | 'rejected' | 'expired'
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  resolutionNote: text("resolution_note"),
+  ...timestamps,
+});
+
+export const messages = pgTable("messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id),
+  role: text("role").notNull(), // 'user' | 'system'
+  content: text("content").notNull(),
+  linkedApprovalId: uuid("linked_approval_id").references(() => approvals.id),
   ...timestamps,
 });
 
