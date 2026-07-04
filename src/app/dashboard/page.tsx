@@ -7,9 +7,23 @@ import { forUser } from "@/lib/db/queries";
 
 export const dynamic = "force-dynamic";
 
+// Attention-first ordering: projects blocked on the user float to the top —
+// the dashboard is the OS's notification center (PLAN §"core screen").
+const ATTENTION_ORDER: Partial<Record<ProjectState, number>> = {
+  needs_input: 0,
+  paused: 1,
+  review: 2,
+  awaiting_plan_approval: 3,
+};
+
 export default async function DashboardPage() {
   const userId = await getDevUserId();
-  const projects = await forUser(userId).listProjects();
+  const projects = (await forUser(userId).listProjects()).sort((a, b) => {
+    const pa = ATTENTION_ORDER[a.state as ProjectState] ?? 99;
+    const pb = ATTENTION_ORDER[b.state as ProjectState] ?? 99;
+    if (pa !== pb) return pa - pb;
+    return b.createdAt.getTime() - a.createdAt.getTime();
+  });
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-8">

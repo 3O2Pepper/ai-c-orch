@@ -5,6 +5,7 @@ import { ArtifactPreview } from "@/components/artifact-preview";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { CostMeter } from "@/components/cost-meter";
 import { EventLog } from "@/components/event-log";
+import { GatePanel } from "@/components/gate-panel";
 import { ModelCallsTable } from "@/components/model-calls-table";
 import { PhaseTimeline } from "@/components/phase-timeline";
 import { StateBadge } from "@/components/state-badge";
@@ -27,14 +28,21 @@ export default async function ProjectPage({
   const project = await q.getProject(id);
   if (!project) notFound();
 
-  const [phases, artifacts, events, modelCalls] = await Promise.all([
-    q.listPhases(id),
-    q.listArtifacts(id),
-    q.listEvents(id),
-    q.listModelCalls(id),
-  ]);
+  const [phases, artifacts, events, modelCalls, messages, pendingApproval] =
+    await Promise.all([
+      q.listPhases(id),
+      q.listArtifacts(id),
+      q.listEvents(id),
+      q.listModelCalls(id),
+      q.listMessages(id),
+      q.getPendingApproval(id),
+    ]);
   const latestArtifact = artifacts[0] ?? null;
   const state = project.state as ProjectState;
+  const gateState =
+    state === "needs_input" || state === "paused" || state === "review"
+      ? state
+      : null;
 
   let pendingSpec = null;
   if (state === "awaiting_plan_approval") {
@@ -63,10 +71,20 @@ export default async function ProjectPage({
 
       {pendingSpec && <ApprovalPanel projectId={project.id} spec={pendingSpec} />}
 
+      {gateState && (
+        <GatePanel
+          projectId={project.id}
+          state={gateState}
+          approvalPayload={
+            (pendingApproval?.payload as Record<string, unknown> | null) ?? null
+          }
+        />
+      )}
+
       {state === "failed" && (
         <p className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
           This run failed — see the event log for the reason. Re-planning arrives in
-          Phase 2.
+          Phase 3.
         </p>
       )}
 
@@ -85,11 +103,30 @@ export default async function ProjectPage({
           <ArtifactPreview artifact={latestArtifact} />
         </section>
 
-        <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Event log
-          </h2>
-          <EventLog events={events} />
+        <section className="space-y-6">
+          <div>
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Event log
+            </h2>
+            <EventLog events={events} />
+          </div>
+          {messages.length > 0 && (
+            <div>
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Decisions &amp; messages
+              </h2>
+              <ol className="space-y-2">
+                {messages.map((m) => (
+                  <li key={m.id} className="text-xs">
+                    <span className="font-medium">
+                      {m.role === "user" ? "You" : "System"}:
+                    </span>{" "}
+                    {m.content}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
         </section>
       </div>
 
