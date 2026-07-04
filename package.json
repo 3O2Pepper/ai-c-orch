@@ -1,5 +1,5 @@
 {
-  "name": "ai-c-orch",
+  "name": "ai-project-router",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -8,17 +8,22 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
     "db:seed": "tsx --env-file=.env.local src/lib/db/seed.ts",
-    "gateway:verify": "tsx --env-file=.env.local scripts/verify-gateway.ts"
+    "verify:gateway": "tsx --env-file=.env.local scripts/verify-gateway.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
     "@neondatabase/serverless": "^1.1.0",
+    "@tailwindcss/typography": "^0.5.20",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
+    "isomorphic-dompurify": "^3.18.0",
     "lucide-react": "^1.23.0",
     "next": "16.2.10",
     "radix-ui": "^1.6.1",
@@ -37,11 +42,9 @@
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
-    "pg": "^8.22.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
     "typescript": "^5",

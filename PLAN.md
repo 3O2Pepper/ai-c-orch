@@ -1,69 +1,49 @@
 # AI Project Router — Phase 1 Implementation Plan
 
-> **One-line positioning:** "Type what you want. Get a finished project, not a conversation."
->
-> This file is the in-repo source of truth for Phase 1. It supersedes the original planning
-> document where they differ. Sections marked **[Later]** are reference for Phases 2–4 and
-> must not be built in Phase 1.
+One-line positioning: "Type what you want. Get a finished project, not a conversation."
+
+This file is the in-repo source of truth for Phase 1. It supersedes the original planning document where they differ. Sections marked [Later] are reference for Phases 2–4 and must not be built in Phase 1.
 
 ## 0. Decisions applied from plan review (2026-07-02)
 
-1. **One deployable.** No separate orchestrator worker. Inngest (Phase 2) serves its
-   functions from a Next.js route handler. "Services" are modules under `src/lib/`.
-2. **Phase 1 runs locally only** (`next dev`). The plain async workflow runner cannot
-   survive serverless timeouts. First deploy happens in Phase 2, after Inngest owns
-   long-running work.
-3. **Deferred out of Phase 1:** auth (seed one user row; keep `user_id` columns
-   everywhere), object storage (artifact content lives in a Postgres text column until
-   Phase 3), BYO API keys (`ANTHROPIC_API_KEY` env var; `api_keys` table in Phase 4),
-   SSE (2s polling on the project page), RLS (app-layer `user_id` scoping helper).
-4. **Structured outputs are native, not retried.** Intake uses `client.messages.parse()`
-   with a Zod schema (`zodOutputFormat` from `@anthropic-ai/sdk/helpers/zod`) — the API
-   enforces the schema server-side. One retry for transport errors only; no
-   schema-error-feedback loop.
-5. **Optimistic concurrency on every state transition.** Transitions are conditional
-   writes: `UPDATE projects SET state = $new WHERE id = $id AND state = $expected`,
-   assert rows-affected = 1. Applies from the very first Approve button.
-6. **Model table refreshed** (see §6). Sonnet 5 takes coding/spec routes; Opus 4.8 takes
-   planning/synthesis/critique; Haiku 4.5 takes digests. Gateway exposes no sampling
-   params (rejected with 400 on current models). Router gains a `revision` phase type.
+- **One deployable.** No separate orchestrator worker. Inngest (Phase 2) serves its functions from a Next.js route handler. "Services" are modules under `src/lib/`.
+- **Phase 1 runs locally only** (`next dev`). The plain async workflow runner cannot survive serverless timeouts. First deploy happens in Phase 2, after Inngest owns long-running work.
+- **Deferred out of Phase 1:** auth (seed one user row; keep `user_id` columns everywhere), object storage (artifact content lives in a Postgres text column until Phase 3), BYO API keys (`ANTHROPIC_API_KEY` env var; `api_keys` table in Phase 4), SSE (2s polling on the project page), RLS (app-layer `user_id` scoping helper).
+- **Structured outputs are native, not retried.** Intake uses `client.messages.parse()` with a Zod schema (`zodOutputFormat` from `@anthropic-ai/sdk/helpers/zod`) — the API enforces the schema server-side. One retry for transport errors only; no schema-error-feedback loop.
+- **Optimistic concurrency on every state transition.** Transitions are conditional writes: `UPDATE projects SET state = $new WHERE id = $id AND state = $expected`, assert rows-affected = 1. Applies from the very first Approve button.
+- **Model table refreshed** (see §6). Sonnet 5 takes coding/spec routes; Opus 4.8 takes planning/synthesis/critique; Haiku 4.5 takes digests. Gateway exposes no sampling params (rejected with 400 on current models). Router gains a revision phase type.
 
 ## 1. Phase 1 scope — the vertical slice
 
-**Goal:** messy text → structured spec → approved plan → one generated Research report
-artifact → visible in UI with full cost/event trail.
+**Goal:** messy text → structured spec → approved plan → one generated Research report artifact → visible in UI with full cost/event trail.
 
-In scope:
+**In scope:**
 
-- Intake: one textarea → `ProjectSpec` (Zod-validated, structured outputs).
+- Intake: one textarea → ProjectSpec (Zod-validated, structured outputs).
 - Plan card: spec, assumptions, blocking questions rendered; Approve flips state.
-- Hardcoded Research workflow (no tools, model-knowledge-only draft): spec → outline →
-  draft → done. Plain async function triggered on approval.
+- Hardcoded Research workflow (no tools, model-knowledge-only draft): spec → outline → draft → done. Plain async function triggered on approval.
 - Versioned artifact (markdown report) stored in Postgres, rendered in UI.
-- Event log (append-only `events` table) and per-project cost meter from `model_calls`.
+- Event log (append-only events table) and per-project cost meter from model_calls.
 - Dashboard listing projects with state chips.
 
-**Exit test:** type a messy request, approve the plan, read the report in the browser,
-and point at every model call and its cost in the DB.
+**Exit test:** type a messy request, approve the plan, read the report in the browser, and point at every model call and its cost in the DB.
 
-**Explicitly NOT in Phase 1:** Inngest, `needs_input` gate, revision loop, budget gate,
-web search, sandbox, xlsx/code templates, context service layers, router config file
-(the runner hardcodes model choices), auth, deploy.
+**Explicitly NOT in Phase 1:** Inngest, needs_input gate, revision loop, budget gate, web search, sandbox, xlsx/code templates, context service layers, router config file (the runner hardcodes model choices), auth, deploy.
 
 ## 2. Stack
 
 | Concern | Choice | Why |
-| --- | --- | --- |
+|---------|--------|-----|
 | App | Next.js (App Router) + TypeScript | as planned |
 | UI | Tailwind + shadcn/ui | defaults; phase timeline / plan card / artifact preview are the only bespoke components |
 | DB | Postgres on Neon | serverless, no local Docker needed on Windows |
 | ORM | Drizzle | schema-first, types flow from schema, SQL-transparent migrations |
-| LLM | `@anthropic-ai/sdk` (official) | structured outputs via `messages.parse`; multi-provider comes with the router in Phase 3 behind our own `generate()` seam |
+| LLM | @anthropic-ai/sdk (official) | structured outputs via messages.parse; multi-provider comes with the router in Phase 3 behind our own generate() seam |
 | Tests | Vitest | unit tests on core domain (state machine, cost math) |
-| Jobs **[Later]** | Inngest, served from a Next.js route handler | durable waits for gates, retries, resumability — Phase 2 |
-| Storage **[Later]** | Cloudflare R2 | Phase 3, when xlsx/code artifacts arrive |
-| Auth **[Later]** | Clerk | Phase 4, before external testers |
-| Sandbox **[Later]** | E2B | Phase 3; generated code never runs in our process |
+| Jobs [Later] | Inngest, served from a Next.js route handler | durable waits for gates, retries, resumability — Phase 2 |
+| Storage [Later] | Cloudflare R2 | Phase 3, when xlsx/code artifacts arrive |
+| Auth [Later] | Clerk | Phase 4, before external testers |
+| Sandbox [Later] | E2B | Phase 3; generated code never runs in our process |
 
 ## 3. File structure
 
@@ -101,19 +81,17 @@ web search, sandbox, xlsx/code templates, context service layers, router config 
     plan-card.tsx, phase-timeline.tsx, artifact-preview.tsx, cost-meter.tsx, event-log.tsx
 ```
 
-Rules:
+**Rules:**
 
 - `lib/core` imports nothing from Next, Drizzle, or the SDK. It is the spec-as-code.
-- All model calls go through `lib/gateway`. Metering cannot be bypassed because there is
-  exactly one code path.
-- Only `runner.ts` (later: the workflow engine) calls `transitions.ts` against the DB.
-  The UI renders state; it never computes it.
+- All model calls go through `lib/gateway`. Metering cannot be bypassed because there is exactly one code path.
+- Only `runner.ts` (later: the workflow engine) calls `transitions.ts` against the DB. The UI renders state; it never computes it.
 
 ## 4. Database schema (Phase 1 subset)
 
 Timestamps (`created_at`, `updated_at`) on every table, implied below.
 
-```sql
+```
 users(
   id uuid pk, email text unique, name text, settings jsonb
 );
@@ -164,42 +142,32 @@ events(
 );
 ```
 
-**[Later] tables**, added when their feature lands (do not create empty now):
-`api_keys` (P4), `context_items` (P3 — pinned spec/decisions, digests, rolling summary,
-`superseded_by` versioning), `approvals` (P2 — durable gates), `messages` (P2 — composer
-and revision loop).
+**[Later] tables**, added when their feature lands (do not create empty now): `api_keys` (P4), `context_items` (P3 — pinned spec/decisions, digests, rolling summary, superseded_by versioning), `approvals` (P2 — durable gates), `messages` (P2 — composer and revision loop).
 
-**Concurrency:** `projects.state` changes only via
-`UPDATE … SET state=$next WHERE id=$id AND state=$expected` + rows-affected check.
-Same pattern for `phases.state`.
+**Concurrency:** `projects.state` changes only via `UPDATE … SET state=$next WHERE id=$id AND state=$expected` + rows-affected check. Same pattern for `phases.state`.
 
 ## 5. State machines
 
-Project (Phase 1 uses the subset in **bold**; full machine arrives with Inngest in P2):
+**Project** (Phase 1 uses the subset in bold; full machine arrives with Inngest in P2):
 
-```
 **draft → specifying → awaiting_plan_approval → running → review → done**
                      ↘ clarifying ↗                 ↕ needs_input / paused   [P2]
 failed / cancelled reachable from any active state
-```
 
-Phase: `pending → running → done`, with `running → failed`.
-[P2] adds `needs_input`; [P4] adds `verifying → fixing → verifying` (max 1 cycle).
+**Phase:** pending → running → done, with running → failed. [P2] adds needs_input; [P4] adds verifying → fixing → verifying (max 1 cycle).
 
-Rules (enforced now, they're free):
+**Rules** (enforced now, they're free):
 
-- Every transition writes an `events` row.
-- Transitions live in one exhaustive-switch function in `lib/core/transitions.ts`;
-  illegal transitions are compile errors (`never` check) and runtime errors.
+- Every transition writes an events row.
+- Transitions live in one exhaustive-switch function in `lib/core/transitions.ts`; illegal transitions are compile errors (`never` check) and runtime errors.
 - `failed` always carries a human-readable reason in the event payload.
 
 ## 6. Model registry (current as of 2026-07-02)
 
-One source of truth in `lib/core/pricing.ts`, consumed by the gateway (cost calc) and
-later by the router (Phase 3) and plan-card estimates (Phase 4).
+One source of truth in `lib/core/pricing.ts`, consumed by the gateway (cost calc) and later by the router (Phase 3) and plan-card estimates (Phase 4).
 
 | Route (phase_type) | Model | $/Mtok in/out | Notes |
-| --- | --- | --- | --- |
+|--------------------|-------|---------------|-------|
 | spec_extraction | claude-sonnet-5 | 3 / 15 (intro 2 / 10 thru 2026-08-31) | structured outputs |
 | planning | claude-opus-4-8 | 5 / 25 | adaptive thinking |
 | research_gather [P3] | claude-sonnet-5 | — | + web_search tool |
@@ -209,68 +177,39 @@ later by the router (Phase 3) and plan-card estimates (Phase 4).
 | critique [P4] | claude-opus-4-8 | — | |
 | revision [P2] | claude-sonnet-5 | — | was missing from the original router table |
 
-API constraints baked into the gateway:
+**API constraints baked into the gateway:**
 
-- **No `temperature`/`top_p`/`top_k`** — rejected with 400 on Opus 4.8 / Sonnet 5. The
-  `generate()` interface does not expose sampling params.
-- **Thinking is adaptive** (`thinking: {type:"adaptive"}`); depth via
-  `output_config: {effort: "low"|"medium"|"high"}`. Digests run at `low`.
-- **Structured outputs:** `client.messages.parse()` + `zodOutputFormat(Schema)`; read
-  `response.parsed_output`.
-- **Prompt caching** is prefix-match with a ~2–4k-token minimum cacheable prefix — the
-  Section-10 assembly order (stable spec/decisions first) is still right, but verify hits
-  via `usage.cache_read_input_tokens`; log all four usage fields into `model_calls`.
-- **Stream any call that may exceed ~16k output tokens** (draft phase): `messages.stream()`
-  → `finalMessage()`.
+- No temperature/top_p/top_k — rejected with 400 on Opus 4.8 / Sonnet 5. The `generate()` interface does not expose sampling params.
+- Thinking is adaptive (`thinking: {type:"adaptive"}`); depth via `output_config: {effort: "low"|"medium"|"high"}`. Digests run at low.
+- Structured outputs: `client.messages.parse()` + `zodOutputFormat(Schema)`; read `response.parsed_output`.
+- Prompt caching is prefix-match with a ~2–4k-token minimum cacheable prefix — the Section-10 assembly order (stable spec/decisions first) is still right, but verify hits via `usage.cache_read_input_tokens`; log all four usage fields into model_calls.
+- Stream any call that may exceed ~16k output tokens (draft phase): `messages.stream()` → `finalMessage()`.
 
 ## 7. Commit sequence (Phase 1)
 
-1. **Scaffold** — create-next-app (TS, App Router, Tailwind), shadcn init, Drizzle +
-   Neon connection, Vitest. This PLAN.md committed at repo root.
-2. **Core domain** — `lib/core/`: Zod schemas (`ProjectSpec`, `WorkflowPlan`,
-   `PhaseResult`), state enums, exhaustive transition function. Unit tests. No I/O.
-3. **Schema + seed** — Drizzle schema (§4), first migration, seed script inserting the
-   dev user. Scoped query helper in `db/client.ts`.
-4. **Gateway** — `generate()`/`generateObject()` wrapping `@anthropic-ai/sdk`; price map
-   from `pricing.ts`; every call logged to `model_calls` and rolled into
-   `projects.spent_usd` in one transaction. Verified with a standalone script before any
-   UI exists.
-5. **Intake** — `POST /api/projects`: raw text → `messages.parse` → `projects` +
-   `project_specs` + `events` rows. One transport retry.
-6. **Plan card** — `/new`: textarea → submit → render spec, assumptions, questions,
-   Approve/Cancel. Approve calls the conditional-update transition and returns 409 on a
-   state race.
-7. **Runner** — hardcoded Research workflow (outline → draft), writes `phases`,
-   streams the draft, writes the `artifacts` row (content inline), appends `events`,
-   transitions project to `review` → `done` (auto-done in P1; the review gate becomes
-   real in P2).
-8. **Project page** — `/project/[id]`: phase timeline, rendered markdown artifact
-   (sanitized), event log, cost meter. 2s polling via router refresh.
+1. **Scaffold** — create-next-app (TS, App Router, Tailwind), shadcn init, Drizzle + Neon connection, Vitest. This PLAN.md committed at repo root.
+2. **Core domain** — `lib/core/`: Zod schemas (ProjectSpec, WorkflowPlan, PhaseResult), state enums, exhaustive transition function. Unit tests. No I/O.
+3. **Schema + seed** — Drizzle schema (§4), first migration, seed script inserting the dev user. Scoped query helper in `db/client.ts`.
+4. **Gateway** — `generate()`/`generateObject()` wrapping @anthropic-ai/sdk; price map from pricing.ts; every call logged to model_calls and rolled into projects.spent_usd in one transaction. Verified with a standalone script before any UI exists.
+5. **Intake** — POST /api/projects: raw text → messages.parse → projects + project_specs + events rows. One transport retry.
+6. **Plan card** — /new: textarea → submit → render spec, assumptions, questions, Approve/Cancel. Approve calls the conditional-update transition and returns 409 on a state race.
+7. **Runner** — hardcoded Research workflow (outline → draft), writes phases, streams the draft, writes the artifacts row (content inline), appends events, transitions project to review → done (auto-done in P1; the review gate becomes real in P2).
+8. **Project page** — /project/[id]: phase timeline, rendered markdown artifact (sanitized), event log, cost meter. 2s polling via router refresh.
 9. **Dashboard** — project list, state chips, cost-to-date, New Project button.
-10. **Hardening pass** — empty/error states, failed-run surfacing, `spent_usd` vs
-    `sum(model_calls.cost_usd)` consistency check in a test.
+10. **Hardening pass** — empty/error states, failed-run surfacing, spent_usd vs sum(model_calls.cost_usd) consistency check in a test.
 
 ## 8. Phase 2–4 map (unchanged intent, one-line each) [Later]
 
-- **P2 — engine + gates:** Inngest inside Next.js; full state machines with durable
-  `waitForEvent`; `approvals` + `messages` tables; `needs_input` + delivery gates; revision
-  loop; budget tracking + budget gate; first deploy.
-- **P3 — router + tools + templates:** router config table + fallbacks; web search;
-  E2B sandbox; Build + Analyze templates; `context_items` service (pinned spec/decisions,
-  digests, rolling summary, token budgets); R2 artifact storage; artifact versioning UI.
-- **P4 — verify + harden:** per-kind verification with one fix cycle; sandboxed iframe
-  previews + sanitization; secret redaction on intake; SSRF guards on fetch tools;
-  Clerk auth + `api_keys` (encrypted); per-user daily caps; cost estimates on plan cards;
-  5-user test.
+- **P2** — engine + gates: Inngest inside Next.js; full state machines with durable waitForEvent; approvals + messages tables; needs_input + delivery gates; revision loop; budget tracking + budget gate; first deploy.
+- **P3** — router + tools + templates: router config table + fallbacks; web search; E2B sandbox; Build + Analyze templates; context_items service (pinned spec/decisions, digests, rolling summary, token budgets); R2 artifact storage; artifact versioning UI.
+- **P4** — verify + harden: per-kind verification with one fix cycle; sandboxed iframe previews + sanitization; secret redaction on intake; SSRF guards on fetch tools; Clerk auth + api_keys (encrypted); per-user daily caps; cost estimates on plan cards; 5-user test.
 
-Deliberately after v1: auto-approval policies, embeddings retrieval, custom workflows,
-integrations, billing.
+Deliberately after v1: auto-approval policies, embeddings retrieval, custom workflows, integrations, billing.
 
 ## 9. Security invariants that survive every phase
 
-1. Provider keys never enter any prompt-assembly path (env → gateway only).
-2. Generated code never executes in our process — sandbox only (P3+).
-3. Model-generated markdown/HTML is sanitized; HTML previews render only in a sandboxed
-   iframe (P4 formalizes; P1 sanitizes markdown).
-4. Every DB query goes through the userId-scoped helper, even while there is one user.
-5. All tool output is data, not instructions (delimited, framed) once tools exist (P3+).
+- Provider keys never enter any prompt-assembly path (env → gateway only).
+- Generated code never executes in our process — sandbox only (P3+).
+- Model-generated markdown/HTML is sanitized; HTML previews render only in a sandboxed iframe (P4 formalizes; P1 sanitizes markdown).
+- Every DB query goes through the userId-scoped helper, even while there is one user.
+- All tool output is data, not instructions (delimited, framed) once tools exist (P3+).
