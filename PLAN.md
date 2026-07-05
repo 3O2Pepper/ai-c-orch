@@ -184,19 +184,28 @@ Same pattern for `phases.state`.
 
 ## 5. State machines
 
-Project (Phase 1 uses the subset in **bold**; full machine arrives with Inngest in P2):
+Project (as built through Phase 2; `clarifying` remains [Later]):
 
 ```
-**draft → specifying → awaiting_plan_approval → running → review → done**
-                     ↘ clarifying ↗                 ↕ needs_input / paused   [P2]
+draft → specifying → awaiting_plan_approval → running ⇄ needs_input
+                                                 ⇅ paused (budget)
+                                              running → review → done
+                                                 review → running (revision, max 10)
 failed / cancelled reachable from any active state
 ```
 
 Phase: `pending → running → done`, with `running → failed`.
-**[P2]** adds `needs_input`; **[P4]** adds `verifying → fixing → verifying` (max 1 cycle).
+**[P4]** adds `verifying → fixing → verifying` (max 1 cycle).
 
-Rules (enforced now, they're free):
-- Every transition writes an `events` row.
+Gate dwell times (P2 decision — deviates from the original "expire to paused"):
+- `needs_input`: 7 days, then the run proceeds with the outline's
+  `recommended_default`, recorded as a system message (assumption-first).
+- `paused` (budget): 7 days, then the run is cancelled.
+- `review`: waits indefinitely (re-armed per round, bounded by the revision cap).
+
+Rules (enforced):
+- Every transition writes an `events` row atomically with the state change
+  (single-statement CTE — the neon-http driver has no transactions).
 - Transitions live in one exhaustive-`switch` function in `lib/core/transitions.ts`;
   illegal transitions are compile errors (`never` check) and runtime errors.
 - `failed` always carries a human-readable reason in the event payload.
