@@ -29,7 +29,9 @@ export default async function DashboardPage() {
     <main className="mx-auto max-w-3xl space-y-6 p-8">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Projects</h1>
-        <Button render={<Link href="/new" />}>New Project</Button>
+        <Button render={<Link href="/new" />} nativeButton={false}>
+          New Project
+        </Button>
       </header>
 
       {projects.length === 0 ? (
@@ -38,7 +40,7 @@ export default async function DashboardPage() {
             No projects yet. Describe what you want and get a finished project, not a
             conversation.
           </p>
-          <Button render={<Link href="/new" />} className="mt-4">
+          <Button render={<Link href="/new" />} nativeButton={false} className="mt-4">
             Create your first project
           </Button>
         </div>
