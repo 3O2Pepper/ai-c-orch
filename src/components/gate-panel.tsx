@@ -21,9 +21,11 @@ interface GatePanelProps {
   projectId: string;
   state: "needs_input" | "paused" | "review";
   approvalPayload: Record<string, unknown> | null;
+  /** ISO timestamp of the gate's auto-resolution deadline (null = waits indefinitely). */
+  expiresAt?: string | null;
 }
 
-export function GatePanel({ projectId, state, approvalPayload }: GatePanelProps) {
+export function GatePanel({ projectId, state, approvalPayload, expiresAt }: GatePanelProps) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,6 +52,12 @@ export function GatePanel({ projectId, state, approvalPayload }: GatePanelProps)
   }
 
   const payload = approvalPayload ?? {};
+  const deadline = expiresAt
+    ? new Date(expiresAt).toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : null;
 
   return (
     <div className="space-y-3">
@@ -58,6 +66,11 @@ export function GatePanel({ projectId, state, approvalPayload }: GatePanelProps)
           <CardHeader>
             <CardTitle className="text-base">The run needs your input</CardTitle>
             <CardDescription>{String(payload.question ?? "")}</CardDescription>
+            {deadline && (
+              <p className="text-xs text-muted-foreground">
+                No answer by {deadline} → the run proceeds with the recommended default.
+              </p>
+            )}
           </CardHeader>
           <CardContent>
             <Textarea
@@ -100,6 +113,11 @@ export function GatePanel({ projectId, state, approvalPayload }: GatePanelProps)
               {Number(payload.budgetUsd ?? 0).toFixed(2)} budget. Raise it to continue,
               or stop the run.
             </CardDescription>
+            {deadline && (
+              <p className="text-xs text-muted-foreground">
+                No decision by {deadline} → the run is cancelled.
+              </p>
+            )}
           </CardHeader>
           <CardContent>
             <input

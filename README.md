@@ -46,6 +46,14 @@ scope and architecture.
    The Inngest dashboard (http://localhost:8288) shows the durable run, its
    steps, and any gates it is waiting on.
 
+   Reliability notes (P2 hardening): gate resolutions are written to the
+   database first and published to Inngest through an outbox (`event_outbox`),
+   with a once-a-minute sweeper re-sending anything undelivered — so resolving
+   a gate while the Inngest dev server is down delays the run by at most a
+   minute after it returns, and never strands it. Every gate timeout re-checks
+   the approvals table before acting, so the recorded decision always wins
+   over "no event arrived".
+
 ## Scripts
 
 | Script | What it does |

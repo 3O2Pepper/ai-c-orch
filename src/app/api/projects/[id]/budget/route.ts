@@ -1,13 +1,14 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { budgetRaised, inngest, projectCancelled } from "@/inngest/client";
+import { budgetRaised, projectCancelled } from "@/inngest/client";
 import { TransitionError } from "@/lib/core/transitions";
 import { getDb } from "@/lib/db/client";
 import { getDevUserId } from "@/lib/db/dev-user";
 import { forUser } from "@/lib/db/queries";
 import { projects } from "@/lib/db/schema";
 import { resolveApproval } from "@/lib/services/approvals";
+import { publishEvent } from "@/lib/services/outbox";
 import { applyProjectTransition, StateRaceError } from "@/lib/services/state";
 
 const BodySchema = z.discriminatedUnion("action", [
@@ -72,12 +73,14 @@ export async function POST(
         .set({ budgetUsd: String(newBudget) })
         .where(eq(projects.id, id));
       await applyProjectTransition(id, "paused", { type: "resumed" });
-      await inngest.send(
+      await publishEvent(
+        id,
         budgetRaised.create({
           projectId: id,
           approvalId: approval.id,
           newBudgetUsd: newBudget,
         }),
+        `budget-raised:${approval.id}`,
       );
       return NextResponse.json({ state: "running" });
     }
@@ -88,7 +91,11 @@ export async function POST(
       return NextResponse.json({ error: "Already resolved" }, { status: 409 });
     }
     await applyProjectTransition(id, "paused", { type: "cancelled" });
-    await inngest.send(projectCancelled.create({ projectId: id }));
+    await publishEvent(
+      id,
+      projectCancelled.create({ projectId: id }),
+      `cancelled:${id}`,
+    );
     return NextResponse.json({ state: "cancelled" });
   } catch (err) {
     if (err instanceof StateRaceError || err instanceof TransitionError) {

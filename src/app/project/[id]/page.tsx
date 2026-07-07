@@ -78,6 +78,7 @@ export default async function ProjectPage({
           approvalPayload={
             (pendingApproval?.payload as Record<string, unknown> | null) ?? null
           }
+          expiresAt={pendingApproval?.expiresAt?.toISOString() ?? null}
         />
       )}
 

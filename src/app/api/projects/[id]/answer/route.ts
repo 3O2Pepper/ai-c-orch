@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { inngest, inputProvided } from "@/inngest/client";
+import { inputProvided } from "@/inngest/client";
 import { TransitionError } from "@/lib/core/transitions";
 import { getDb } from "@/lib/db/client";
 import { getDevUserId } from "@/lib/db/dev-user";
 import { forUser } from "@/lib/db/queries";
 import { messages } from "@/lib/db/schema";
 import { resolveApproval } from "@/lib/services/approvals";
+import { publishEvent } from "@/lib/services/outbox";
 import { applyProjectTransition, StateRaceError } from "@/lib/services/state";
 
 const BodySchema = z.object({
@@ -57,8 +58,10 @@ export async function POST(
       linkedApprovalId: approval.id,
     });
     await applyProjectTransition(id, "needs_input", { type: "input_provided" });
-    await inngest.send(
+    await publishEvent(
+      id,
       inputProvided.create({ projectId: id, approvalId: approval.id, answer }),
+      `input:${approval.id}`,
     );
     return NextResponse.json({ state: "running" });
   } catch (err) {

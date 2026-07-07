@@ -15,6 +15,7 @@ export const inputProvided = eventType("project/input.provided", {
 export const reviewResolved = eventType("project/review.resolved", {
   schema: staticSchema<{
     projectId: string;
+    approvalId: string; // waits match on this — a stale round's event can't satisfy a later gate
     action: "accept" | "revise";
     instructions?: string;
   }>(),

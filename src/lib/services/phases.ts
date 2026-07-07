@@ -1,4 +1,5 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { GATE_DWELL_MS } from "@/lib/core/gates";
 import { PHASE_MODEL_ROUTES } from "@/lib/core/routes";
 import {
   OutlineSchema,
@@ -7,7 +8,7 @@ import {
   type Outline,
   type ProjectSpec,
 } from "@/lib/core/spec";
-import type { PhaseState, ProjectState } from "@/lib/core/states";
+import { isTerminal, type PhaseState, type ProjectState } from "@/lib/core/states";
 import {
   phaseTransition,
   transition,
@@ -26,7 +27,7 @@ import {
   REVISION_SYSTEM,
   revisionPrompt,
 } from "@/lib/prompts/research";
-import { createApproval, resolveApproval } from "./approvals";
+import { createApproval, getApprovalResolution, resolveApproval } from "./approvals";
 import { appendEvent } from "./events";
 import {
   applyPhaseTransition,
@@ -35,9 +36,10 @@ import {
 } from "./state";
 
 // Step-callable units for the durable workflow (src/inngest/functions).
-// Each function is invoked inside step.run: if the process dies mid-step,
-// Inngest re-invokes the step, so transitions tolerate "already applied"
-// races (a completed step is memoized and never re-run).
+// Every function here is replay-safe: if a step is re-executed (crash after
+// the work committed but before Inngest recorded the result, or a retry),
+// it detects already-applied work — tolerated transitions, upserted
+// approvals, one-artifact-per-phase — instead of duplicating it.
 
 async function transitionProject(
   projectId: string,
@@ -91,6 +93,19 @@ async function loadSpec(projectId: string): Promise<ProjectSpec> {
   return ProjectSpecSchema.parse(specRow.spec);
 }
 
+async function getProjectState(projectId: string): Promise<ProjectState> {
+  const [row] = await getDb()
+    .select({ state: projects.state })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  if (!row) throw new Error("Project not found");
+  return row.state as ProjectState;
+}
+
+function gateDeadline(): Date {
+  return new Date(Date.now() + GATE_DWELL_MS);
+}
+
 /** Ownership check + phase-row materialization. First step of every run. */
 export async function initRun(projectId: string, userId: string) {
   const db = getDb();
@@ -134,7 +149,16 @@ export async function runOutlinePhase(
   phaseId: string,
   spec: ProjectSpec,
 ): Promise<Outline> {
+  const db = getDb();
   const route = PHASE_MODEL_ROUTES.outline;
+
+  // Replay guard: the phase already finished — reuse the persisted outline
+  // instead of paying for a second model call.
+  const [row] = await db.select().from(phases).where(eq(phases.id, phaseId));
+  if (row?.state === "done" && row.output) {
+    return OutlineSchema.parse(row.output);
+  }
+
   await transitionPhase(projectId, phaseId, "pending", { type: "phase_started" });
   const result = await generateObject({
     projectId,
@@ -148,15 +172,16 @@ export async function runOutlinePhase(
     effort: route.effort,
   });
   const outline = result.object;
-  await getDb()
+  await db
     .update(phases)
     .set({
+      output: outline,
       outputSummary:
         `${outline.sections.length} sections: ` +
         outline.sections.map((s) => s.heading).join("; ") +
         (outline.blocking_question ? " — raised a blocking question" : ""),
       modelUsed: route.model,
-      attempts: 1,
+      attempts: sql`${phases.attempts} + 1`,
     })
     .where(eq(phases.id, phaseId));
   await transitionPhase(projectId, phaseId, "running", { type: "phase_done" });
@@ -168,23 +193,45 @@ export async function openInputGate(
   projectId: string,
   question: { question: string; recommended_default: string },
 ): Promise<string> {
-  const approvalId = await createApproval(projectId, "needs_input", question);
+  const approvalId = await createApproval(projectId, "needs_input", question, {
+    expiresAt: gateDeadline(),
+  });
   await transitionProject(projectId, "running", { type: "input_requested" });
   return approvalId;
 }
 
-/** 7-day dwell expiry: proceed with the recommended default, recorded. */
-export async function resolveInputGateByDefault(
+export type InputSettlement =
+  | { cancelled: true }
+  | { cancelled: false; answer: string };
+
+/**
+ * Called when the needs_input wait times out. The DB is the source of
+ * truth: if a route already resolved the gate (the event was missed or its
+ * send failed), honor the recorded answer instead of the default.
+ */
+export async function settleInputGate(
   projectId: string,
   approvalId: string,
   defaultAnswer: string,
-): Promise<void> {
-  await resolveApproval(
+): Promise<InputSettlement> {
+  if (isTerminal(await getProjectState(projectId))) return { cancelled: true };
+
+  const recorded = await getApprovalResolution(approvalId);
+  if (recorded) return applyRecordedInput(projectId, recorded);
+
+  // Genuinely unanswered: expire to the recommended default (PLAN §5).
+  const won = await resolveApproval(
     projectId,
     approvalId,
     "expired",
     `Proceeded with recommended default: ${defaultAnswer}`,
   );
+  if (!won) {
+    // A route resolved it between our read and the conditional update.
+    const late = await getApprovalResolution(approvalId);
+    if (late) return applyRecordedInput(projectId, late);
+    throw new Error(`Approval ${approvalId} resolved but has no resolution`);
+  }
   await getDb().insert(messages).values({
     projectId,
     role: "system",
@@ -192,6 +239,22 @@ export async function resolveInputGateByDefault(
     linkedApprovalId: approvalId,
   });
   await transitionProject(projectId, "needs_input", { type: "input_provided" });
+  return { cancelled: false, answer: defaultAnswer };
+}
+
+async function applyRecordedInput(
+  projectId: string,
+  recorded: { status: string; note: string | null },
+): Promise<InputSettlement> {
+  if (recorded.status === "rejected") return { cancelled: true }; // cancel route closed it
+  // 'approved' (answer route stores the answer as the note) or 'expired'
+  // (a previous replay of this settle step already applied the default).
+  await transitionProject(projectId, "needs_input", { type: "input_provided" });
+  const answer =
+    recorded.status === "approved"
+      ? (recorded.note ?? "")
+      : (recorded.note?.replace(/^Proceeded with recommended default: /, "") ?? "");
+  return { cancelled: false, answer };
 }
 
 export async function checkBudget(projectId: string) {
@@ -210,18 +273,55 @@ export async function openBudgetGate(
   projectId: string,
   figures: { spentUsd: number; budgetUsd: number },
 ): Promise<string> {
-  const approvalId = await createApproval(projectId, "budget", figures);
+  const approvalId = await createApproval(projectId, "budget", figures, {
+    expiresAt: gateDeadline(),
+  });
   await transitionProject(projectId, "running", { type: "budget_exceeded" });
   return approvalId;
 }
 
-/** Budget dwell expiry: treat as stop — expire the approval, cancel the run. */
-export async function expireBudgetGate(
+/**
+ * Called when the budget wait times out. If a route already resolved the
+ * gate, honor it: a recorded raise continues the run (never cancel a paid
+ * raise because its event was missed); a recorded stop ends it. Only a
+ * genuinely unattended gate expires to cancellation (PLAN §5).
+ */
+export async function settleBudgetGate(
   projectId: string,
   approvalId: string,
-): Promise<void> {
-  await resolveApproval(projectId, approvalId, "expired", "No decision within dwell time");
+): Promise<"continue" | "cancelled"> {
+  if (isTerminal(await getProjectState(projectId))) return "cancelled";
+
+  const applyRecorded = async (recorded: { status: string }) => {
+    if (recorded.status === "approved") {
+      await transitionProject(projectId, "paused", { type: "resumed" });
+      return "continue" as const;
+    }
+    return "cancelled" as const; // stopped by route, or expired by an earlier replay
+  };
+
+  const recorded = await getApprovalResolution(approvalId);
+  if (recorded) return applyRecorded(recorded);
+
+  const won = await resolveApproval(
+    projectId,
+    approvalId,
+    "expired",
+    "No decision within dwell time",
+  );
+  if (!won) {
+    const late = await getApprovalResolution(approvalId);
+    if (late) return applyRecorded(late);
+    throw new Error(`Approval ${approvalId} resolved but has no resolution`);
+  }
+  await getDb().insert(messages).values({
+    projectId,
+    role: "system",
+    content: "No budget decision within the dwell time — the run was cancelled.",
+    linkedApprovalId: approvalId,
+  });
   await transitionProject(projectId, "paused", { type: "cancelled" });
+  return "cancelled";
 }
 
 export async function runDraftPhase(
@@ -233,6 +333,15 @@ export async function runDraftPhase(
 ): Promise<{ artifactVersion: number }> {
   const db = getDb();
   const route = PHASE_MODEL_ROUTES.draft;
+
+  // Replay guard: phase done means its artifact was written — reuse it.
+  const [row] = await db.select().from(phases).where(eq(phases.id, phaseId));
+  if (row?.state === "done") {
+    const version = await findArtifactVersion(phaseId);
+    if (version !== null) return { artifactVersion: version };
+    throw new Error(`Draft phase ${phaseId} is done but has no artifact`);
+  }
+
   await transitionPhase(projectId, phaseId, "pending", { type: "phase_started" });
 
   const draft = await generateText({
@@ -250,7 +359,7 @@ export async function runDraftPhase(
     .set({
       outputSummary: `Drafted ${draft.text.length} chars`,
       modelUsed: route.model,
-      attempts: 1,
+      attempts: sql`${phases.attempts} + 1`,
     })
     .where(eq(phases.id, phaseId));
 
@@ -268,14 +377,6 @@ export async function runRevisionPhase(
   const db = getDb();
   const route = PHASE_MODEL_ROUTES.revision;
   const spec = await loadSpec(projectId);
-
-  const [latest] = await db
-    .select()
-    .from(artifacts)
-    .where(eq(artifacts.projectId, projectId))
-    .orderBy(desc(artifacts.version))
-    .limit(1);
-  if (!latest?.content) throw new Error("No artifact to revise");
 
   // Idempotent on step replay: reuse this round's phase row if present
   const name = `Revision ${round}`;
@@ -302,6 +403,21 @@ export async function runRevisionPhase(
       .returning();
   }
 
+  // Replay guard: this round already completed — reuse its artifact.
+  if (phase.state === "done") {
+    const version = await findArtifactVersion(phase.id);
+    if (version !== null) return { artifactVersion: version };
+    throw new Error(`Revision phase ${phase.id} is done but has no artifact`);
+  }
+
+  const [latest] = await db
+    .select()
+    .from(artifacts)
+    .where(eq(artifacts.projectId, projectId))
+    .orderBy(desc(artifacts.version))
+    .limit(1);
+  if (!latest?.content) throw new Error("No artifact to revise");
+
   if (phase.state === "pending") {
     await transitionPhase(projectId, phase.id, "pending", { type: "phase_started" });
   }
@@ -320,7 +436,7 @@ export async function runRevisionPhase(
     .set({
       outputSummary: `Revised to ${revised.text.length} chars`,
       modelUsed: route.model,
-      attempts: 1,
+      attempts: sql`${phases.attempts} + 1`,
     })
     .where(eq(phases.id, phase.id));
 
@@ -335,13 +451,50 @@ export async function runRevisionPhase(
   return { artifactVersion: version };
 }
 
-/** running -> review + delivery approval (Gate 4). */
+/** running -> review + delivery approval (Gate 4, waits indefinitely). */
 export async function enterReview(
   projectId: string,
   artifactVersion: number,
 ): Promise<string> {
   await transitionProject(projectId, "running", { type: "run_completed" });
   return createApproval(projectId, "delivery", { artifactVersion });
+}
+
+export type ReviewResolution =
+  | { action: "accept" }
+  | { action: "revise"; instructions: string }
+  | { action: "cancelled" };
+
+/**
+ * Called when a review wait times out. Null means the reviewer simply
+ * hasn't decided — the caller re-arms the wait without consuming a
+ * revision round. A recorded resolution (missed event / failed send /
+ * route crash mid-sequence) is honored, including finishing any
+ * transition the route didn't get to.
+ */
+export async function getReviewResolution(
+  projectId: string,
+  approvalId: string,
+): Promise<ReviewResolution | null> {
+  if (isTerminal(await getProjectState(projectId))) return { action: "cancelled" };
+
+  const recorded = await getApprovalResolution(approvalId);
+  if (!recorded) return null; // still pending — keep waiting
+
+  if (recorded.status === "approved") {
+    await transitionProject(projectId, "review", { type: "delivery_accepted" });
+    return { action: "accept" };
+  }
+  // 'rejected' = revision requested (the cancel route also rejects, but
+  // that path was caught by the terminal-state check above).
+  const [msg] = await getDb()
+    .select({ content: messages.content })
+    .from(messages)
+    .where(and(eq(messages.linkedApprovalId, approvalId), eq(messages.role, "user")))
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+  await transitionProject(projectId, "review", { type: "revision_requested" });
+  return { action: "revise", instructions: msg?.content ?? recorded.note ?? "" };
 }
 
 /** onFailure hook: mark whatever active state the project is in as failed. */
@@ -368,6 +521,15 @@ function slugify(title: string): string {
   );
 }
 
+async function findArtifactVersion(phaseId: string): Promise<number | null> {
+  const [existing] = await getDb()
+    .select({ version: artifacts.version })
+    .from(artifacts)
+    .where(eq(artifacts.phaseId, phaseId))
+    .limit(1);
+  return existing?.version ?? null;
+}
+
 async function writeReportArtifact(
   projectId: string,
   phaseId: string,
@@ -376,6 +538,13 @@ async function writeReportArtifact(
   draftCostUsd: number,
 ): Promise<number> {
   const db = getDb();
+
+  // Replay guard: one artifact per phase (unique index). Checking before
+  // the digest call means a replay repeats neither the insert nor the
+  // paid Haiku call.
+  const already = await findArtifactVersion(phaseId);
+  if (already !== null) return already;
+
   const digestRoute = PHASE_MODEL_ROUTES.digest;
   const digest = await generateText({
     projectId,
@@ -408,7 +577,14 @@ async function writeReportArtifact(
       version,
       digest: digest.text.trim(),
     })
+    .onConflictDoNothing()
     .returning({ id: artifacts.id });
+  if (!artifact) {
+    // Lost a replay race on the unique index — the artifact exists.
+    const version = await findArtifactVersion(phaseId);
+    if (version !== null) return version;
+    throw new Error(`Artifact insert for phase ${phaseId} conflicted but none found`);
+  }
   await appendEvent(projectId, "artifact_created", {
     artifactId: artifact.id,
     filename,

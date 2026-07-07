@@ -1,16 +1,16 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { inngest, reviewResolved } from "@/inngest/client";
+import { reviewResolved } from "@/inngest/client";
+import { MAX_REVISION_ROUNDS } from "@/lib/core/gates";
 import { TransitionError } from "@/lib/core/transitions";
 import { getDb } from "@/lib/db/client";
 import { getDevUserId } from "@/lib/db/dev-user";
 import { forUser } from "@/lib/db/queries";
 import { messages, phases } from "@/lib/db/schema";
 import { resolveApproval } from "@/lib/services/approvals";
+import { publishEvent } from "@/lib/services/outbox";
 import { applyProjectTransition, StateRaceError } from "@/lib/services/state";
-
-const MAX_REVISION_ROUNDS = 10; // must match the workflow's loop bound
 
 const BodySchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("accept") }),
@@ -56,7 +56,15 @@ export async function POST(
         return NextResponse.json({ error: "Already resolved" }, { status: 409 });
       }
       await applyProjectTransition(id, "review", { type: "delivery_accepted" });
-      await inngest.send(reviewResolved.create({ projectId: id, action: "accept" }));
+      await publishEvent(
+        id,
+        reviewResolved.create({
+          projectId: id,
+          approvalId: approval.id,
+          action: "accept",
+        }),
+        `review:${approval.id}`,
+      );
       return NextResponse.json({ state: "done" });
     }
 
@@ -92,8 +100,15 @@ export async function POST(
       linkedApprovalId: approval.id,
     });
     await applyProjectTransition(id, "review", { type: "revision_requested" });
-    await inngest.send(
-      reviewResolved.create({ projectId: id, action: "revise", instructions }),
+    await publishEvent(
+      id,
+      reviewResolved.create({
+        projectId: id,
+        approvalId: approval.id,
+        action: "revise",
+        instructions,
+      }),
+      `review:${approval.id}`,
     );
     return NextResponse.json({ state: "running" });
   } catch (err) {

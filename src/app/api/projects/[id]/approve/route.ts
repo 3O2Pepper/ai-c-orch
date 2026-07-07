@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { inngest, planApproved } from "@/inngest/client";
+import { planApproved } from "@/inngest/client";
 import type { ProjectState } from "@/lib/core/states";
 import { TransitionError } from "@/lib/core/transitions";
 import { getDevUserId } from "@/lib/db/dev-user";
 import { forUser } from "@/lib/db/queries";
 import { resolveApproval } from "@/lib/services/approvals";
+import { publishEvent } from "@/lib/services/outbox";
 import { applyProjectTransition, StateRaceError } from "@/lib/services/state";
 
 // Gate 1 (plan approval): resolve the approval, transition, and hand the
@@ -33,7 +34,11 @@ export async function POST(
       await resolveApproval(project.id, approval.id, "approved");
     }
 
-    await inngest.send(planApproved.create({ projectId: project.id, userId }));
+    await publishEvent(
+      project.id,
+      planApproved.create({ projectId: project.id, userId }),
+      `plan-approved:${project.id}`,
+    );
     return NextResponse.json({ state });
   } catch (err) {
     if (err instanceof StateRaceError || err instanceof TransitionError) {
