@@ -1,6 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
-import { PHASE_MODEL_ROUTES } from "@/lib/core/routes";
 import { ProjectSpecSchema, type ProjectSpec } from "@/lib/core/spec";
 import { getDb } from "@/lib/db/client";
 import { projects, projectSpecs } from "@/lib/db/schema";
@@ -8,6 +7,7 @@ import { generateObject } from "@/lib/gateway";
 import { INTAKE_SYSTEM, intakePrompt } from "@/lib/prompts/intake";
 import { createApproval } from "./approvals";
 import { appendEvent } from "./events";
+import { resolveRoute } from "./router";
 import { applyProjectTransition } from "./state";
 
 function isTransportError(err: unknown): boolean {
@@ -83,8 +83,8 @@ export async function createProjectFromRequest(
   }
 }
 
-function extractSpec(projectId: string, rawRequest: string) {
-  const route = PHASE_MODEL_ROUTES.spec_extraction;
+async function extractSpec(projectId: string, rawRequest: string) {
+  const route = await resolveRoute("spec_extraction");
   return generateObject({
     projectId,
     purpose: "spec_extraction",
@@ -94,5 +94,6 @@ function extractSpec(projectId: string, rawRequest: string) {
     schema: ProjectSpecSchema,
     maxTokens: route.maxTokens,
     effort: route.effort,
+    fallbackModel: route.fallbackModel,
   });
 }

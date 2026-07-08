@@ -33,6 +33,12 @@ interface BaseCall {
   prompt: string;
   maxTokens?: number;
   effort?: Effort;
+  /**
+   * Tried once when the primary model fails with an overload-class error
+   * (429/5xx/529/connection) after the SDK's own retries are exhausted.
+   * Both attempts are metered — the failed primary logs an error row.
+   */
+  fallbackModel?: ModelId;
 }
 
 export interface TextResult {
@@ -99,27 +105,59 @@ async function metered<T>(
   }
 }
 
+/** Overload-class error: worth one attempt on the fallback model. */
+function isOverloadError(err: unknown): boolean {
+  if (err instanceof Anthropic.APIConnectionError) return true;
+  if (err instanceof Anthropic.APIError) {
+    const status = err.status ?? 0;
+    return status === 429 || status >= 500;
+  }
+  return false;
+}
+
+/**
+ * Router fallback (P3): run the attempt on the primary model; on an
+ * overload-class failure, run it once more on call.fallbackModel.
+ */
+async function withModelFallback<T>(
+  call: BaseCall,
+  attempt: (model: ModelId) => Promise<T>,
+): Promise<T> {
+  try {
+    return await attempt(call.model);
+  } catch (err) {
+    const fallback = call.fallbackModel;
+    if (!fallback || fallback === call.model || !isOverloadError(err)) throw err;
+    console.warn(
+      `gateway: ${call.model} failed for '${call.purpose}' — falling back to ${fallback}`,
+    );
+    return attempt(fallback);
+  }
+}
+
 /**
  * Free-form text generation. Always streams internally (safe for large
  * max_tokens) and returns the final message.
  */
 export async function generateText(call: BaseCall): Promise<TextResult> {
-  const { result, usage, costUsd } = await metered(call, async () => {
-    const stream = getClient().messages.stream({
-      model: call.model,
-      max_tokens: call.maxTokens ?? 16000,
-      ...tuningParams(call.model, call.effort ?? "high"),
-      ...(call.system ? { system: call.system } : {}),
-      messages: [{ role: "user", content: call.prompt }],
+  return withModelFallback(call, async (model) => {
+    const { result, usage, costUsd } = await metered({ ...call, model }, async () => {
+      const stream = getClient().messages.stream({
+        model,
+        max_tokens: call.maxTokens ?? 16000,
+        ...tuningParams(model, call.effort ?? "high"),
+        ...(call.system ? { system: call.system } : {}),
+        messages: [{ role: "user", content: call.prompt }],
+      });
+      const message = await stream.finalMessage();
+      const text = message.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+      return { result: text, usage: toUsage(message.usage) };
     });
-    const message = await stream.finalMessage();
-    const text = message.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("");
-    return { result: text, usage: toUsage(message.usage) };
+    return { text: result, usage, costUsd };
   });
-  return { text: result, usage, costUsd };
 }
 
 /**
@@ -130,25 +168,27 @@ export async function generateText(call: BaseCall): Promise<TextResult> {
 export async function generateObject<S extends z.ZodType>(
   call: BaseCall & { schema: S },
 ): Promise<ObjectResult<z.infer<S>>> {
-  const { result, usage, costUsd } = await metered(call, async () => {
-    const caps = MODELS[call.model];
-    const response = await getClient().messages.parse({
-      model: call.model,
-      max_tokens: call.maxTokens ?? 16000,
-      ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
-      output_config: {
-        ...(caps.effort ? { effort: call.effort ?? "high" } : {}),
-        format: zodOutputFormat(call.schema),
-      },
-      ...(call.system ? { system: call.system } : {}),
-      messages: [{ role: "user", content: call.prompt }],
+  return withModelFallback(call, async (model) => {
+    const { result, usage, costUsd } = await metered({ ...call, model }, async () => {
+      const caps = MODELS[model];
+      const response = await getClient().messages.parse({
+        model,
+        max_tokens: call.maxTokens ?? 16000,
+        ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
+        output_config: {
+          ...(caps.effort ? { effort: call.effort ?? "high" } : {}),
+          format: zodOutputFormat(call.schema),
+        },
+        ...(call.system ? { system: call.system } : {}),
+        messages: [{ role: "user", content: call.prompt }],
+      });
+      if (response.parsed_output == null) {
+        throw new Error(
+          `Structured output missing (stop_reason: ${response.stop_reason})`,
+        );
+      }
+      return { result: response.parsed_output, usage: toUsage(response.usage) };
     });
-    if (response.parsed_output == null) {
-      throw new Error(
-        `Structured output missing (stop_reason: ${response.stop_reason})`,
-      );
-    }
-    return { result: response.parsed_output, usage: toUsage(response.usage) };
+    return { object: result, usage, costUsd };
   });
-  return { object: result, usage, costUsd };
 }

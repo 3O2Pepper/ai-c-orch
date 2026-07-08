@@ -1,6 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { GATE_DWELL_MS } from "@/lib/core/gates";
-import { PHASE_MODEL_ROUTES } from "@/lib/core/routes";
 import {
   OutlineSchema,
   ProjectSpecSchema,
@@ -29,6 +28,7 @@ import {
 } from "@/lib/prompts/research";
 import { createApproval, getApprovalResolution, resolveApproval } from "./approvals";
 import { appendEvent } from "./events";
+import { resolveRoute } from "./router";
 import {
   applyPhaseTransition,
   applyProjectTransition,
@@ -150,7 +150,7 @@ export async function runOutlinePhase(
   spec: ProjectSpec,
 ): Promise<Outline> {
   const db = getDb();
-  const route = PHASE_MODEL_ROUTES.outline;
+  const route = await resolveRoute("outline");
 
   // Replay guard: the phase already finished — reuse the persisted outline
   // instead of paying for a second model call.
@@ -170,6 +170,7 @@ export async function runOutlinePhase(
     schema: OutlineSchema,
     maxTokens: route.maxTokens,
     effort: route.effort,
+    fallbackModel: route.fallbackModel,
   });
   const outline = result.object;
   await db
@@ -332,7 +333,7 @@ export async function runDraftPhase(
   decision: string | null,
 ): Promise<{ artifactVersion: number }> {
   const db = getDb();
-  const route = PHASE_MODEL_ROUTES.draft;
+  const route = await resolveRoute("draft");
 
   // Replay guard: phase done means its artifact was written — reuse it.
   const [row] = await db.select().from(phases).where(eq(phases.id, phaseId));
@@ -353,6 +354,7 @@ export async function runDraftPhase(
     prompt: draftPrompt(spec, outline, decision),
     maxTokens: route.maxTokens,
     effort: route.effort,
+    fallbackModel: route.fallbackModel,
   });
   await db
     .update(phases)
@@ -375,7 +377,7 @@ export async function runRevisionPhase(
   round: number,
 ): Promise<{ artifactVersion: number }> {
   const db = getDb();
-  const route = PHASE_MODEL_ROUTES.revision;
+  const route = await resolveRoute("revision");
   const spec = await loadSpec(projectId);
 
   // Idempotent on step replay: reuse this round's phase row if present
@@ -430,6 +432,7 @@ export async function runRevisionPhase(
     prompt: revisionPrompt(spec, latest.content, instructions),
     maxTokens: route.maxTokens,
     effort: route.effort,
+    fallbackModel: route.fallbackModel,
   });
   await db
     .update(phases)
@@ -545,7 +548,7 @@ async function writeReportArtifact(
   const already = await findArtifactVersion(phaseId);
   if (already !== null) return already;
 
-  const digestRoute = PHASE_MODEL_ROUTES.digest;
+  const digestRoute = await resolveRoute("digest");
   const digest = await generateText({
     projectId,
     phaseId,
@@ -555,6 +558,7 @@ async function writeReportArtifact(
     prompt: content,
     maxTokens: digestRoute.maxTokens,
     effort: digestRoute.effort,
+    fallbackModel: digestRoute.fallbackModel,
   });
 
   const [latest] = await db
