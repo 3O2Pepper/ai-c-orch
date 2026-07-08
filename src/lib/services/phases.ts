@@ -591,7 +591,7 @@ export async function markRunFailed(projectId: string, reason: string): Promise<
   );
 }
 
-function slugify(title: string): string {
+export function slugify(title: string): string {
   return (
     title
       .toLowerCase()
@@ -601,7 +601,7 @@ function slugify(title: string): string {
   );
 }
 
-async function findArtifactVersion(phaseId: string): Promise<number | null> {
+export async function findArtifactVersion(phaseId: string): Promise<number | null> {
   const [existing] = await getDb()
     .select({ version: artifacts.version })
     .from(artifacts)
@@ -610,12 +610,17 @@ async function findArtifactVersion(phaseId: string): Promise<number | null> {
   return existing?.version ?? null;
 }
 
-async function writeReportArtifact(
+/**
+ * Versioned text artifact writer, generalized for P3 templates: digest via
+ * Haiku, content placed through the storage seam, one artifact per phase
+ * (replay-safe), digest recorded into the context service.
+ */
+export async function writeTextArtifact(
   projectId: string,
   phaseId: string,
-  spec: ProjectSpec,
   content: string,
-  draftCostUsd: number,
+  generationCostUsd: number,
+  opts: { kind: string; filename: string },
 ): Promise<number> {
   const db = getDb();
 
@@ -645,17 +650,16 @@ async function writeReportArtifact(
     .orderBy(desc(artifacts.version))
     .limit(1);
   const version = (latest?.version ?? 0) + 1;
-  const filename = `${slugify(spec.title)}.md`;
 
   // P3: content goes to object storage when configured, inline otherwise.
-  const stored = await storeArtifactText(projectId, filename, version, content);
+  const stored = await storeArtifactText(projectId, opts.filename, version, content);
   const [artifact] = await db
     .insert(artifacts)
     .values({
       projectId,
       phaseId,
-      kind: "report",
-      filename,
+      kind: opts.kind,
+      filename: opts.filename,
       content: stored.content,
       storageKey: stored.storageKey,
       version,
@@ -672,11 +676,24 @@ async function writeReportArtifact(
   await recordArtifactDigest(projectId, artifact.id, digest.text.trim());
   await appendEvent(projectId, "artifact_created", {
     artifactId: artifact.id,
-    filename,
-    kind: "report",
+    filename: opts.filename,
+    kind: opts.kind,
     version,
     chars: content.length,
-    costUsd: draftCostUsd + digest.costUsd,
+    costUsd: generationCostUsd + digest.costUsd,
   });
   return version;
+}
+
+async function writeReportArtifact(
+  projectId: string,
+  phaseId: string,
+  spec: ProjectSpec,
+  content: string,
+  draftCostUsd: number,
+): Promise<number> {
+  return writeTextArtifact(projectId, phaseId, content, draftCostUsd, {
+    kind: "report",
+    filename: `${slugify(spec.title)}.md`,
+  });
 }

@@ -28,8 +28,6 @@ export function estimateTokens(text: string): number {
 /** Default assembly budget for phase prompts. */
 export const CONTEXT_BUDGET_TOKENS = 8000;
 
-type ContextItemRow = typeof contextItems.$inferSelect;
-
 async function liveItems(projectId: string, kind?: ContextKind) {
   const db = getDb();
   const where = kind

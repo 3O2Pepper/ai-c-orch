@@ -119,6 +119,20 @@ export const GatherNotesSchema = z.object({
 
 export type GatherNotes = z.infer<typeof GatherNotesSchema>;
 
+/** Output of an implement_code / xlsx_build generation call. */
+export const CodeArtifactSchema = z.object({
+  filename: z
+    .string()
+    .describe("Single file, e.g. main.py — lowercase, no directories"),
+  language: z.string().describe("e.g. python, typescript"),
+  code: z.string().describe("The complete file content"),
+  usage_notes: z
+    .string()
+    .describe("How to run/use the file, dependencies, expected output"),
+});
+
+export type CodeArtifact = z.infer<typeof CodeArtifactSchema>;
+
 /**
  * The fixed Research plan. Phase 3 added the web-search gather phase in
  * front of the stable Phase 2 outline -> draft flow; projects created
