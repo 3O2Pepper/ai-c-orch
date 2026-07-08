@@ -7,6 +7,7 @@ import { getDevUserId } from "@/lib/db/dev-user";
 import { forUser } from "@/lib/db/queries";
 import { messages } from "@/lib/db/schema";
 import { resolveApproval } from "@/lib/services/approvals";
+import { recordDecision } from "@/lib/services/context";
 import { publishEvent } from "@/lib/services/outbox";
 import { applyProjectTransition, StateRaceError } from "@/lib/services/state";
 
@@ -57,6 +58,13 @@ export async function POST(
       content: answer,
       linkedApprovalId: approval.id,
     });
+    const question =
+      (approval.payload as { question?: string } | null)?.question ?? "open question";
+    await recordDecision(
+      id,
+      `Q: ${question} — user decided: ${answer}`,
+      `approval:${approval.id}`,
+    );
     await applyProjectTransition(id, "needs_input", { type: "input_provided" });
     await publishEvent(
       id,

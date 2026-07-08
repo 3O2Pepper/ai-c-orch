@@ -27,6 +27,13 @@ import {
   revisionPrompt,
 } from "@/lib/prompts/research";
 import { createApproval, getApprovalResolution, resolveApproval } from "./approvals";
+import {
+  assembleContext,
+  CONTEXT_BUDGET_TOKENS,
+  maybeRollUpDecisions,
+  recordArtifactDigest,
+  recordDecision,
+} from "./context";
 import { appendEvent } from "./events";
 import { resolveRoute } from "./router";
 import {
@@ -239,6 +246,11 @@ export async function settleInputGate(
     content: `No answer within the dwell time — proceeding with the recommended default: ${defaultAnswer}`,
     linkedApprovalId: approvalId,
   });
+  await recordDecision(
+    projectId,
+    `Open question expired unanswered — proceeded with the recommended default: ${defaultAnswer}`,
+    `approval:${approvalId}`,
+  );
   await transitionProject(projectId, "needs_input", { type: "input_provided" });
   return { cancelled: false, answer: defaultAnswer };
 }
@@ -423,13 +435,17 @@ export async function runRevisionPhase(
   if (phase.state === "pending") {
     await transitionPhase(projectId, phase.id, "pending", { type: "phase_started" });
   }
+  // Long-running projects: compact old decisions, then assemble the
+  // token-budgeted context block (spec + decisions + latest digest).
+  await maybeRollUpDecisions(projectId);
+  const context = await assembleContext(projectId, CONTEXT_BUDGET_TOKENS);
   const revised = await generateText({
     projectId,
     phaseId: phase.id,
     purpose: "revision",
     model: route.model,
     system: REVISION_SYSTEM,
-    prompt: revisionPrompt(spec, latest.content, instructions),
+    prompt: revisionPrompt(context, latest.content, instructions),
     maxTokens: route.maxTokens,
     effort: route.effort,
     fallbackModel: route.fallbackModel,
@@ -589,6 +605,7 @@ async function writeReportArtifact(
     if (version !== null) return version;
     throw new Error(`Artifact insert for phase ${phaseId} conflicted but none found`);
   }
+  await recordArtifactDigest(projectId, artifact.id, digest.text.trim());
   await appendEvent(projectId, "artifact_created", {
     artifactId: artifact.id,
     filename,

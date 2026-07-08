@@ -64,12 +64,12 @@ Rules:
   of, say so inline rather than inventing precision.`;
 
 export function revisionPrompt(
-  spec: ProjectSpec,
+  context: string,
   previousReport: string,
   instructions: string,
 ): string {
   return [
-    `Project spec:\n${JSON.stringify(spec, null, 2)}`,
+    context, // assembled project context: spec, recorded decisions, digest
     `Current report:\n---\n${previousReport}\n---`,
     `Revision request from the user:\n${instructions}`,
     `Return the complete revised report.`,

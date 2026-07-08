@@ -6,6 +6,7 @@ import { projects, projectSpecs } from "@/lib/db/schema";
 import { generateObject } from "@/lib/gateway";
 import { INTAKE_SYSTEM, intakePrompt } from "@/lib/prompts/intake";
 import { createApproval } from "./approvals";
+import { pinSpec } from "./context";
 import { appendEvent } from "./events";
 import { resolveRoute } from "./router";
 import { applyProjectTransition } from "./state";
@@ -56,6 +57,7 @@ export async function createProjectFromRequest(
       spec,
       createdBy: "system",
     });
+    await pinSpec(project.id, spec, 1);
     await db
       .update(projects)
       .set({ title: spec.title })
