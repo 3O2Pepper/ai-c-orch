@@ -33,4 +33,13 @@ describe("costUsd", () => {
     });
     expect(total).toBeCloseTo(2.7, 10);
   });
+
+  it("prices web search requests at $10 per 1,000", () => {
+    const total = costUsd("claude-sonnet-5", {
+      inputTokens: 0,
+      outputTokens: 0,
+      webSearchRequests: 3,
+    });
+    expect(total).toBeCloseTo(0.03, 10);
+  });
 });

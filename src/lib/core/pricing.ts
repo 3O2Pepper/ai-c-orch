@@ -58,11 +58,17 @@ export interface Usage {
   outputTokens: number;
   cacheReadInputTokens?: number;
   cacheCreationInputTokens?: number;
+  /** Server-side web_search tool invocations (billed per search). */
+  webSearchRequests?: number;
 }
 
 // Cache reads bill at ~0.1x input price, cache writes at ~1.25x (5m TTL).
 const CACHE_READ_MULTIPLIER = 0.1;
 const CACHE_WRITE_MULTIPLIER = 1.25;
+
+// Web search server tool: $10 per 1,000 searches, on top of the tokens the
+// results consume (which land in the normal usage fields).
+export const WEB_SEARCH_COST_PER_REQUEST = 0.01;
 
 export function costUsd(model: ModelId, usage: Usage): number {
   const m = MODELS[model];
@@ -72,6 +78,7 @@ export function costUsd(model: ModelId, usage: Usage): number {
     usage.inputTokens * perTokIn +
     usage.outputTokens * perTokOut +
     (usage.cacheReadInputTokens ?? 0) * perTokIn * CACHE_READ_MULTIPLIER +
-    (usage.cacheCreationInputTokens ?? 0) * perTokIn * CACHE_WRITE_MULTIPLIER
+    (usage.cacheCreationInputTokens ?? 0) * perTokIn * CACHE_WRITE_MULTIPLIER +
+    (usage.webSearchRequests ?? 0) * WEB_SEARCH_COST_PER_REQUEST
   );
 }
