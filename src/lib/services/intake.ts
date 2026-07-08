@@ -1,6 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
-import { ProjectSpecSchema, type ProjectSpec } from "@/lib/core/spec";
+import {
+  ProjectSpecSchema,
+  templateForDeliverable,
+  type ProjectSpec,
+} from "@/lib/core/spec";
 import { getDb } from "@/lib/db/client";
 import { projects, projectSpecs } from "@/lib/db/schema";
 import { generateObject } from "@/lib/gateway";
@@ -31,9 +35,10 @@ export async function createProjectFromRequest(
 ): Promise<{ projectId: string; spec: ProjectSpec }> {
   const db = getDb();
 
+  // Template is decided by the extracted spec's primary deliverable below.
   const [project] = await db
     .insert(projects)
-    .values({ userId, rawRequest, state: "draft", workflowTemplate: "research" })
+    .values({ userId, rawRequest, state: "draft" })
     .returning({ id: projects.id });
   await appendEvent(project.id, "project_created", {
     requestChars: rawRequest.length,
@@ -58,12 +63,16 @@ export async function createProjectFromRequest(
       createdBy: "system",
     });
     await pinSpec(project.id, spec, 1);
+    // First deliverable decides the template (report -> research,
+    // code -> build, spreadsheet -> analyze).
+    const template = templateForDeliverable(spec.deliverables[0]?.kind ?? "report");
     await db
       .update(projects)
-      .set({ title: spec.title })
+      .set({ title: spec.title, workflowTemplate: template })
       .where(eq(projects.id, project.id));
     await appendEvent(project.id, "spec_extracted", {
       title: spec.title,
+      template,
       blockingQuestions: spec.blocking_questions.length,
       assumptions: spec.assumptions.length,
       costUsd: result.costUsd,

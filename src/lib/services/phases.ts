@@ -8,6 +8,7 @@ import {
   type GatherNotes,
   type Outline,
   type ProjectSpec,
+  type WorkflowTemplate,
 } from "@/lib/core/spec";
 import { isTerminal, type PhaseState, type ProjectState } from "@/lib/core/states";
 import {
@@ -94,7 +95,7 @@ async function transitionPhase(
   }
 }
 
-async function loadSpec(projectId: string): Promise<ProjectSpec> {
+export async function loadSpec(projectId: string): Promise<ProjectSpec> {
   const [specRow] = await getDb()
     .select()
     .from(projectSpecs)
@@ -118,11 +119,15 @@ function gateDeadline(): Date {
   return new Date(Date.now() + GATE_DWELL_MS);
 }
 
-/** Ownership check + phase-row materialization. First step of every run. */
+/**
+ * Ownership check + template resolution + (for research) phase-row
+ * materialization. First step of every run. Build/Analyze rows are
+ * materialized later by the planning phase.
+ */
 export async function initRun(projectId: string, userId: string) {
   const db = getDb();
   const [owned] = await db
-    .select({ id: projects.id })
+    .select({ id: projects.id, workflowTemplate: projects.workflowTemplate })
     .from(projects)
     .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
     .limit(1);
@@ -131,6 +136,16 @@ export async function initRun(projectId: string, userId: string) {
   }
 
   const spec = await loadSpec(projectId);
+  const template = (owned.workflowTemplate ?? "research") as WorkflowTemplate;
+  if (template !== "research") {
+    return {
+      template,
+      spec,
+      gatherPhaseId: null,
+      outlinePhaseId: null,
+      draftPhaseId: null,
+    };
+  }
 
   // Idempotent on step replay: reuse existing phase rows if present
   const existing = await db
@@ -161,6 +176,7 @@ export async function initRun(projectId: string, userId: string) {
     throw new Error(`Project ${projectId} is missing research phase rows`);
   }
   return {
+    template,
     spec,
     gatherPhaseId: byType("research_gather")?.id ?? null,
     outlinePhaseId: outline.id,
@@ -442,17 +458,9 @@ export async function runDraftPhase(
   return { artifactVersion: version };
 }
 
-/** Revision loop body: new phase row + full re-draft + artifact vN+1. */
-export async function runRevisionPhase(
-  projectId: string,
-  instructions: string,
-  round: number,
-): Promise<{ artifactVersion: number }> {
+/** Materialize (or find) the phase row for a revision round. Idempotent. */
+export async function ensureRevisionPhaseRow(projectId: string, round: number) {
   const db = getDb();
-  const route = await resolveRoute("revision");
-  const spec = await loadSpec(projectId);
-
-  // Idempotent on step replay: reuse this round's phase row if present
   const name = `Revision ${round}`;
   let [phase] = await db
     .select()
@@ -476,6 +484,21 @@ export async function runRevisionPhase(
       })
       .returning();
   }
+  return phase;
+}
+
+/** Revision loop body: new phase row + full re-draft + artifact vN+1. */
+export async function runRevisionPhase(
+  projectId: string,
+  instructions: string,
+  round: number,
+): Promise<{ artifactVersion: number }> {
+  const db = getDb();
+  const route = await resolveRoute("revision");
+  const spec = await loadSpec(projectId);
+
+  // Idempotent on step replay: reuse this round's phase row if present
+  const phase = await ensureRevisionPhaseRow(projectId, round);
 
   // Replay guard: this round already completed — reuse its artifact.
   if (phase.state === "done") {

@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { z } from "zod";
 import {
   CodeArtifactSchema,
   PlanValidationError,
@@ -17,6 +18,8 @@ import { generateObject, generateText } from "@/lib/gateway";
 import {
   ANALYSIS_DRAFT_SYSTEM,
   analysisDraftPrompt,
+  CODE_REVISION_SYSTEM,
+  codeRevisionPrompt,
   IMPLEMENT_SYSTEM,
   implementPrompt,
   PLANNER_SYSTEM,
@@ -26,11 +29,19 @@ import {
 } from "@/lib/prompts/templates";
 import { runPythonInSandbox, sandboxConfigured } from "@/lib/sandbox";
 import { storageConfigured } from "@/lib/storage";
-import { storeArtifactBinary } from "./artifacts";
-import { assembleContext, CONTEXT_BUDGET_TOKENS, recordArtifactDigest } from "./context";
+import { loadArtifactText, storeArtifactBinary } from "./artifacts";
+import {
+  assembleContext,
+  CONTEXT_BUDGET_TOKENS,
+  maybeRollUpDecisions,
+  recordArtifactDigest,
+} from "./context";
 import { appendEvent } from "./events";
 import {
+  ensureRevisionPhaseRow,
   findArtifactVersion,
+  loadSpec,
+  runRevisionPhase,
   slugify,
   writeTextArtifact,
 } from "./phases";
@@ -488,6 +499,90 @@ export async function runXlsxBuildPhase(
   await finishPhase(projectId, phaseId, `Built ${filename}`, route.model, {
     script: script.code,
   });
+  return { artifactVersion: version };
+}
+
+/**
+ * Kind-aware revision (P3): reports re-draft (the stable P2 path), code
+ * artifacts get a full-file code revision, spreadsheets re-run the xlsx
+ * build with the revision request folded in. Same replay-safety contract
+ * as runRevisionPhase — one artifact per revision phase row.
+ */
+export async function runAnyRevisionPhase(
+  projectId: string,
+  instructions: string,
+  round: number,
+): Promise<{ artifactVersion: number }> {
+  const latest = await latestArtifact(projectId);
+  if (!latest) throw new Error("No artifact to revise");
+
+  if (latest.kind === "code") {
+    return runCodeRevisionPhase(projectId, latest, instructions, round);
+  }
+  if (latest.kind === "spreadsheet") {
+    const phase = await ensureRevisionPhaseRow(projectId, round);
+    const spec = await loadSpec(projectId);
+    const xlsxPhase = await findPhaseByType(projectId, "xlsx_build");
+    const objective =
+      (xlsxPhase?.input as { objective?: string } | null)?.objective ??
+      "Rebuild the workbook, applying the revision request";
+    return runXlsxBuildPhase(projectId, phase.id, spec, objective, null, instructions);
+  }
+  return runRevisionPhase(projectId, instructions, round); // report (P2 path)
+}
+
+const CodeRevisionSchema = z.object({
+  code: z.string().describe("The complete revised file content"),
+});
+
+async function runCodeRevisionPhase(
+  projectId: string,
+  latest: typeof artifacts.$inferSelect,
+  instructions: string,
+  round: number,
+): Promise<{ artifactVersion: number }> {
+  const route = await resolveRoute("revision");
+  const phase = await ensureRevisionPhaseRow(projectId, round);
+
+  // Replay guard: this round already completed — reuse its artifact.
+  if (phase.state === "done") {
+    const version = await findArtifactVersion(phase.id);
+    if (version !== null) return { artifactVersion: version };
+    throw new Error(`Revision phase ${phase.id} is done but has no artifact`);
+  }
+
+  const previousCode = await loadArtifactText(latest);
+  if (!previousCode) throw new Error("No code artifact content to revise");
+
+  await startPhase(projectId, phase.id);
+  await maybeRollUpDecisions(projectId);
+  const context = await assembleContext(projectId, CONTEXT_BUDGET_TOKENS);
+  const result = await generateObject({
+    projectId,
+    phaseId: phase.id,
+    purpose: "revision",
+    model: route.model,
+    system: CODE_REVISION_SYSTEM,
+    prompt: codeRevisionPrompt(context, previousCode, instructions),
+    schema: CodeRevisionSchema,
+    maxTokens: route.maxTokens,
+    effort: route.effort,
+    fallbackModel: route.fallbackModel,
+  });
+
+  const version = await writeTextArtifact(
+    projectId,
+    phase.id,
+    result.object.code,
+    result.costUsd,
+    { kind: "code", filename: latest.filename },
+  );
+  await finishPhase(
+    projectId,
+    phase.id,
+    `Revised ${latest.filename} (${result.object.code.length} chars)`,
+    route.model,
+  );
   return { artifactVersion: version };
 }
 

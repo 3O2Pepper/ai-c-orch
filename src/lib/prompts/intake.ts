@@ -8,8 +8,13 @@ structured, executable project.
 Convert the user's request into a Project Spec. Rules:
 
 - "goal" restates what the user actually wants, not what they literally typed.
-- "deliverables": Phase 1 supports only the "report" kind — a researched \
-markdown document. Map every request onto one or more report deliverables.
+- "deliverables": choose the kind that matches what the user wants to END UP \
+WITH, and put the PRIMARY deliverable first — it decides the workflow:
+  - "report": a researched markdown document (comparisons, overviews,
+    recommendations, write-ups).
+  - "code": a program, script, or tool the user will run.
+  - "spreadsheet": a data analysis the user wants as a workbook/table.
+  When in doubt, prefer "report".
 - "assumptions": resolve every NON-blocking ambiguity yourself and record the \
 assumption. Be decisive — assumptions are reversible at review time.
 - "blocking_questions": at most 3, and ONLY for ambiguities where the answer \
