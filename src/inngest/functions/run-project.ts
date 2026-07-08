@@ -1,4 +1,5 @@
 import type { GetStepTools } from "inngest";
+import type { GatherNotes } from "@/lib/core/spec";
 import {
   budgetRaised,
   inngest,
@@ -17,6 +18,7 @@ import {
   openBudgetGate,
   openInputGate,
   runDraftPhase,
+  runGatherPhase,
   runOutlinePhase,
   runRevisionPhase,
   settleBudgetGate,
@@ -71,9 +73,21 @@ export const runProject = inngest.createFunction(
 
     const init = await step.run("init-run", () => initRun(projectId, userId));
 
+    // ---- Gather (P3: web search; null phaseId = pre-P3 project, skip) ----
+    let gather: GatherNotes | null = null;
+    if (init.gatherPhaseId) {
+      const gatherPhaseId = init.gatherPhaseId;
+      if ((await budgetGate(step, projectId, "pre-gather")) === "cancelled") {
+        return { status: "cancelled" };
+      }
+      gather = await step.run("gather", () =>
+        runGatherPhase(projectId, gatherPhaseId, init.spec),
+      );
+    }
+
     // ---- Outline (may raise the consequential-decision gate) ----
     const outline = await step.run("outline", () =>
-      runOutlinePhase(projectId, init.outlinePhaseId, init.spec),
+      runOutlinePhase(projectId, init.outlinePhaseId, init.spec, gather),
     );
 
     let decision: string | null = null;
@@ -106,7 +120,7 @@ export const runProject = inngest.createFunction(
 
     // ---- Draft + artifact v1 ----
     const draft = await step.run("draft", () =>
-      runDraftPhase(projectId, init.draftPhaseId, init.spec, outline, decision),
+      runDraftPhase(projectId, init.draftPhaseId, init.spec, outline, gather, decision),
     );
 
     // ---- Review loop (Gate 4 + revisions) ----

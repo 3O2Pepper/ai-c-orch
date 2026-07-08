@@ -68,7 +68,19 @@ function toUsage(u: Anthropic.Usage): Usage {
     outputTokens: u.output_tokens,
     cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
     cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
+    webSearchRequests: u.server_tool_use?.web_search_requests ?? 0,
   };
+}
+
+function addUsage(into: Usage, u: Anthropic.Usage): void {
+  const add = toUsage(u);
+  into.inputTokens += add.inputTokens;
+  into.outputTokens += add.outputTokens;
+  into.cacheReadInputTokens =
+    (into.cacheReadInputTokens ?? 0) + (add.cacheReadInputTokens ?? 0);
+  into.cacheCreationInputTokens =
+    (into.cacheCreationInputTokens ?? 0) + (add.cacheCreationInputTokens ?? 0);
+  into.webSearchRequests = (into.webSearchRequests ?? 0) + (add.webSearchRequests ?? 0);
 }
 
 async function metered<T>(
@@ -157,6 +169,90 @@ export async function generateText(call: BaseCall): Promise<TextResult> {
       return { result: text, usage: toUsage(message.usage) };
     });
     return { text: result, usage, costUsd };
+  });
+}
+
+export interface SearchTextResult extends TextResult {
+  /** Unique cited sources, in citation order. */
+  sources: { url: string; title: string }[];
+  /** Server-side web searches executed (each billed — see pricing.ts). */
+  searches: number;
+}
+
+const MAX_PAUSE_CONTINUATIONS = 5;
+
+/**
+ * Text generation with the web_search server tool (P3). The API runs the
+ * searches server-side; we only continue the turn when the server-side
+ * loop pauses (stop_reason "pause_turn") and account every search into
+ * the metered cost. Search results are data, not instructions — the
+ * system prompt owns behavior (PLAN §9).
+ */
+export async function generateTextWithSearch(
+  call: BaseCall & { maxSearches?: number },
+): Promise<SearchTextResult> {
+  return withModelFallback(call, async (model) => {
+    const { result, usage, costUsd } = await metered({ ...call, model }, async () => {
+      const client = getClient();
+      const messages: Anthropic.MessageParam[] = [
+        { role: "user", content: call.prompt },
+      ];
+      const total: Usage = { inputTokens: 0, outputTokens: 0 };
+      const contents: Anthropic.ContentBlock[][] = [];
+
+      // pause_turn = the server-side tool loop hit its iteration limit;
+      // append the assistant turn as-is and re-send to resume.
+      for (let continuations = 0; ; continuations++) {
+        const stream = client.messages.stream({
+          model,
+          max_tokens: call.maxTokens ?? 16000,
+          ...tuningParams(model, call.effort ?? "high"),
+          ...(call.system ? { system: call.system } : {}),
+          tools: [
+            {
+              type: "web_search_20260209",
+              name: "web_search",
+              max_uses: call.maxSearches ?? 8,
+            },
+          ],
+          messages,
+        });
+        const message = await stream.finalMessage();
+        addUsage(total, message.usage);
+        contents.push(message.content);
+        if (
+          message.stop_reason !== "pause_turn" ||
+          continuations >= MAX_PAUSE_CONTINUATIONS
+        ) {
+          break;
+        }
+        messages.push({ role: "assistant", content: message.content });
+      }
+
+      const blocks = contents.flat();
+      const text = blocks
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+      const seen = new Set<string>();
+      const sources: SearchTextResult["sources"] = [];
+      for (const b of blocks) {
+        if (b.type !== "text" || !b.citations) continue;
+        for (const c of b.citations) {
+          if (c.type !== "web_search_result_location" || seen.has(c.url)) continue;
+          seen.add(c.url);
+          sources.push({ url: c.url, title: c.title ?? c.url });
+        }
+      }
+      return { result: { text, sources }, usage: total };
+    });
+    return {
+      text: result.text,
+      sources: result.sources,
+      searches: usage.webSearchRequests ?? 0,
+      usage,
+      costUsd,
+    };
   });
 }
 

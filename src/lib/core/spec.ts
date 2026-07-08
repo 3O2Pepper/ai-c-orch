@@ -120,16 +120,17 @@ export const GatherNotesSchema = z.object({
 export type GatherNotes = z.infer<typeof GatherNotesSchema>;
 
 /**
- * The fixed Research plan (the stable Phase 2 flow). The P3 web-search
- * gather phase is added when the workflow gains the gather step, so no
- * project ever materializes a phase row the engine won't run.
+ * The fixed Research plan. Phase 3 added the web-search gather phase in
+ * front of the stable Phase 2 outline -> draft flow; projects created
+ * before P3 have no gather row and the workflow skips the step for them.
  * Build/Analyze plans are planner-generated instead.
  */
 export const RESEARCH_PLAN: WorkflowPlan = {
   template: "research",
   phases: [
-    { idx: 0, name: "Outline", phase_type: "outline" },
-    { idx: 1, name: "Draft report", phase_type: "draft" },
+    { idx: 0, name: "Gather sources", phase_type: "research_gather" },
+    { idx: 1, name: "Outline", phase_type: "outline" },
+    { idx: 2, name: "Draft report", phase_type: "draft" },
   ],
 };
 

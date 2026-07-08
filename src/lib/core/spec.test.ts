@@ -63,8 +63,9 @@ describe("RESEARCH_PLAN", () => {
     plan.phases.forEach((p, i) => expect(p.idx).toBe(i));
   });
 
-  it("outlines before drafting", () => {
+  it("gathers before outlining before drafting", () => {
     expect(RESEARCH_PLAN.phases.map((p) => p.phase_type)).toEqual([
+      "research_gather",
       "outline",
       "draft",
     ]);

@@ -1,9 +1,11 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { GATE_DWELL_MS } from "@/lib/core/gates";
 import {
+  GatherNotesSchema,
   OutlineSchema,
   ProjectSpecSchema,
   RESEARCH_PLAN,
+  type GatherNotes,
   type Outline,
   type ProjectSpec,
 } from "@/lib/core/spec";
@@ -16,11 +18,13 @@ import {
 } from "@/lib/core/transitions";
 import { getDb } from "@/lib/db/client";
 import { artifacts, messages, phases, projects, projectSpecs } from "@/lib/db/schema";
-import { generateObject, generateText } from "@/lib/gateway";
+import { generateObject, generateText, generateTextWithSearch } from "@/lib/gateway";
 import {
   DIGEST_SYSTEM,
   DRAFT_SYSTEM,
   draftPrompt,
+  GATHER_SYSTEM,
+  gatherPrompt,
   OUTLINE_SYSTEM,
   outlinePrompt,
   REVISION_SYSTEM,
@@ -147,14 +151,68 @@ export async function initRun(projectId: string, userId: string) {
       )
       .returning();
   }
-  rows.sort((a, b) => a.idx - b.idx);
-  return { spec, outlinePhaseId: rows[0].id, draftPhaseId: rows[1].id };
+  // Keyed by phase type, not index: pre-P3 projects have no gather row
+  // (gatherPhaseId null -> the workflow skips the step for them).
+  const byType = (t: string) => rows.find((r) => r.phaseType === t);
+  const outline = byType("outline");
+  const draft = byType("draft");
+  if (!outline || !draft) {
+    throw new Error(`Project ${projectId} is missing research phase rows`);
+  }
+  return {
+    spec,
+    gatherPhaseId: byType("research_gather")?.id ?? null,
+    outlinePhaseId: outline.id,
+    draftPhaseId: draft.id,
+  };
+}
+
+/** Web-search gather phase (P3). Output persisted for replay safety. */
+export async function runGatherPhase(
+  projectId: string,
+  phaseId: string,
+  spec: ProjectSpec,
+): Promise<GatherNotes> {
+  const db = getDb();
+  const route = await resolveRoute("research_gather");
+
+  // Replay guard: reuse persisted notes instead of re-searching.
+  const [row] = await db.select().from(phases).where(eq(phases.id, phaseId));
+  if (row?.state === "done" && row.output) {
+    return GatherNotesSchema.parse(row.output);
+  }
+
+  await transitionPhase(projectId, phaseId, "pending", { type: "phase_started" });
+  const result = await generateTextWithSearch({
+    projectId,
+    phaseId,
+    purpose: "research_gather",
+    model: route.model,
+    system: GATHER_SYSTEM,
+    prompt: gatherPrompt(spec),
+    maxTokens: route.maxTokens,
+    effort: route.effort,
+    fallbackModel: route.fallbackModel,
+  });
+  const notes: GatherNotes = { notes: result.text, sources: result.sources };
+  await db
+    .update(phases)
+    .set({
+      output: notes,
+      outputSummary: `Gathered notes from ${result.sources.length} sources (${result.searches} searches)`,
+      modelUsed: route.model,
+      attempts: sql`${phases.attempts} + 1`,
+    })
+    .where(eq(phases.id, phaseId));
+  await transitionPhase(projectId, phaseId, "running", { type: "phase_done" });
+  return notes;
 }
 
 export async function runOutlinePhase(
   projectId: string,
   phaseId: string,
   spec: ProjectSpec,
+  gather: GatherNotes | null,
 ): Promise<Outline> {
   const db = getDb();
   const route = await resolveRoute("outline");
@@ -173,7 +231,7 @@ export async function runOutlinePhase(
     purpose: "outline",
     model: route.model,
     system: OUTLINE_SYSTEM,
-    prompt: outlinePrompt(spec),
+    prompt: outlinePrompt(spec, gather),
     schema: OutlineSchema,
     maxTokens: route.maxTokens,
     effort: route.effort,
@@ -342,6 +400,7 @@ export async function runDraftPhase(
   phaseId: string,
   spec: ProjectSpec,
   outline: Outline,
+  gather: GatherNotes | null,
   decision: string | null,
 ): Promise<{ artifactVersion: number }> {
   const db = getDb();
@@ -363,7 +422,7 @@ export async function runDraftPhase(
     purpose: "draft",
     model: route.model,
     system: DRAFT_SYSTEM,
-    prompt: draftPrompt(spec, outline, decision),
+    prompt: draftPrompt(spec, outline, gather, decision),
     maxTokens: route.maxTokens,
     effort: route.effort,
     fallbackModel: route.fallbackModel,
