@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigserial,
+  boolean,
   index,
   integer,
   jsonb,
@@ -10,12 +11,14 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 // PLAN.md §4 schema. Phase 2 added approvals + messages (durable gates and
 // the composer), then the hardening pass added event_outbox (reliable
 // transition -> Inngest event publishing) and the replay-safety uniqueness
-// rules. Still [Later]: api_keys (P4), context_items (P3).
+// rules. Phase 3 added model_routes (router config) and context_items
+// (context service). Still [Later]: api_keys (P4).
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -193,6 +196,45 @@ export const events = pgTable(
 // re-sends anything unsent, so a failed `inngest.send` can never strand a
 // project in a state no workflow is listening to. dedupe_id doubles as the
 // Inngest event idempotency id, so re-sends never double-deliver.
+// Router config (P3). One row per phase type overrides the code-default
+// registry in lib/core/routes.ts; a missing or invalid row falls back to
+// the code default, so a bad config edit degrades instead of failing runs.
+export const modelRoutes = pgTable("model_routes", {
+  phaseType: text("phase_type").primaryKey(), // PhaseType
+  model: text("model").notNull(), // ModelId — validated against the pricing registry on read
+  effort: text("effort").notNull(), // Effort
+  maxTokens: integer("max_tokens").notNull(),
+  fallbackModel: text("fallback_model"), // tried once on overload-class errors
+  webSearch: boolean("web_search").notNull().default(false),
+  ...timestamps,
+});
+
+// Context service (P3): pinned spec/decisions, artifact digests, and the
+// rolling summary that compacts old decisions. superseded_by versions items
+// instead of deleting them — assembly reads only live (superseded_by IS
+// NULL) rows, history stays auditable.
+export const contextItems = pgTable(
+  "context_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    kind: text("kind").notNull(), // 'pinned_spec' | 'decision' | 'artifact_digest' | 'rolling_summary'
+    content: text("content").notNull(),
+    tokens: integer("tokens").notNull(), // chars/4 estimate at write time (see lib/services/context.ts)
+    pinned: boolean("pinned").notNull().default(false),
+    supersededBy: uuid("superseded_by").references((): AnyPgColumn => contextItems.id),
+    source: text("source"), // provenance: phase/approval/artifact id
+    ...timestamps,
+  },
+  (t) => [
+    index("context_items_live_idx")
+      .on(t.projectId, t.kind)
+      .where(sql`superseded_by is null`),
+  ],
+);
+
 export const eventOutbox = pgTable(
   "event_outbox",
   {
