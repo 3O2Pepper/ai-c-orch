@@ -31,6 +31,7 @@ import {
   revisionPrompt,
 } from "@/lib/prompts/research";
 import { createApproval, getApprovalResolution, resolveApproval } from "./approvals";
+import { loadArtifactText, storeArtifactText } from "./artifacts";
 import {
   assembleContext,
   CONTEXT_BUDGET_TOKENS,
@@ -489,7 +490,8 @@ export async function runRevisionPhase(
     .where(eq(artifacts.projectId, projectId))
     .orderBy(desc(artifacts.version))
     .limit(1);
-  if (!latest?.content) throw new Error("No artifact to revise");
+  const latestContent = latest ? await loadArtifactText(latest) : null;
+  if (!latestContent) throw new Error("No artifact to revise");
 
   if (phase.state === "pending") {
     await transitionPhase(projectId, phase.id, "pending", { type: "phase_started" });
@@ -504,7 +506,7 @@ export async function runRevisionPhase(
     purpose: "revision",
     model: route.model,
     system: REVISION_SYSTEM,
-    prompt: revisionPrompt(context, latest.content, instructions),
+    prompt: revisionPrompt(context, latestContent, instructions),
     maxTokens: route.maxTokens,
     effort: route.effort,
     fallbackModel: route.fallbackModel,
@@ -645,6 +647,8 @@ async function writeReportArtifact(
   const version = (latest?.version ?? 0) + 1;
   const filename = `${slugify(spec.title)}.md`;
 
+  // P3: content goes to object storage when configured, inline otherwise.
+  const stored = await storeArtifactText(projectId, filename, version, content);
   const [artifact] = await db
     .insert(artifacts)
     .values({
@@ -652,7 +656,8 @@ async function writeReportArtifact(
       phaseId,
       kind: "report",
       filename,
-      content,
+      content: stored.content,
+      storageKey: stored.storageKey,
       version,
       digest: digest.text.trim(),
     })

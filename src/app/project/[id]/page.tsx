@@ -13,6 +13,7 @@ import { ProjectSpecSchema } from "@/lib/core/spec";
 import { isTerminal, type ProjectState } from "@/lib/core/states";
 import { getDevUserId } from "@/lib/db/dev-user";
 import { forUser } from "@/lib/db/queries";
+import { loadArtifactText } from "@/lib/services/artifacts";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,10 @@ export default async function ProjectPage({
       q.getPendingApproval(id),
     ]);
   const latestArtifact = artifacts[0] ?? null;
+  // Content may live in object storage (P3) — resolve through the seam.
+  const latestArtifactContent = latestArtifact
+    ? await loadArtifactText(latestArtifact)
+    : null;
   const state = project.state as ProjectState;
   const gateState =
     state === "needs_input" || state === "paused" || state === "review"
@@ -101,7 +106,13 @@ export default async function ProjectPage({
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Artifact
           </h2>
-          <ArtifactPreview artifact={latestArtifact} />
+          <ArtifactPreview
+            artifact={
+              latestArtifact
+                ? { ...latestArtifact, content: latestArtifactContent }
+                : null
+            }
+          />
         </section>
 
         <section className="space-y-6">
