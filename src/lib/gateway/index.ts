@@ -260,6 +260,11 @@ export async function generateTextWithSearch(
  * Schema-enforced generation via native structured outputs. The API
  * guarantees the response validates against the Zod schema — no
  * retry-on-schema-error loop needed (PLAN §0.4).
+ *
+ * Streams like generateText: the SDK REJECTS non-streaming requests whose
+ * max_tokens implies a >10-minute operation (hit live by implement_code's
+ * 32k route), so the final message is assembled from a stream and the JSON
+ * is validated client-side against the same schema the API enforced.
  */
 export async function generateObject<S extends z.ZodType>(
   call: BaseCall & { schema: S },
@@ -267,7 +272,7 @@ export async function generateObject<S extends z.ZodType>(
   return withModelFallback(call, async (model) => {
     const { result, usage, costUsd } = await metered({ ...call, model }, async () => {
       const caps = MODELS[model];
-      const response = await getClient().messages.parse({
+      const stream = getClient().messages.stream({
         model,
         max_tokens: call.maxTokens ?? 16000,
         ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
@@ -278,12 +283,18 @@ export async function generateObject<S extends z.ZodType>(
         ...(call.system ? { system: call.system } : {}),
         messages: [{ role: "user", content: call.prompt }],
       });
-      if (response.parsed_output == null) {
+      const message = await stream.finalMessage();
+      const text = message.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+      if (!text) {
         throw new Error(
-          `Structured output missing (stop_reason: ${response.stop_reason})`,
+          `Structured output missing (stop_reason: ${message.stop_reason})`,
         );
       }
-      return { result: response.parsed_output, usage: toUsage(response.usage) };
+      const object = call.schema.parse(JSON.parse(text)) as z.infer<S>;
+      return { result: object, usage: toUsage(message.usage) };
     });
     return { object: result, usage, costUsd };
   });
