@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ApprovalPanel } from "@/components/approval-panel";
 import { ArtifactPreview } from "@/components/artifact-preview";
+import { ArtifactVersionPicker } from "@/components/artifact-version-picker";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { CostMeter } from "@/components/cost-meter";
 import { EventLog } from "@/components/event-log";
@@ -13,16 +14,19 @@ import { ProjectSpecSchema } from "@/lib/core/spec";
 import { isTerminal, type ProjectState } from "@/lib/core/states";
 import { getDevUserId } from "@/lib/db/dev-user";
 import { forUser } from "@/lib/db/queries";
-import { loadArtifactText } from "@/lib/services/artifacts";
+import { isBinaryFilename, loadArtifactText } from "@/lib/services/artifacts";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProjectPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ v?: string }>;
 }) {
   const { id } = await params;
+  const { v } = await searchParams;
   const userId = await getDevUserId();
   const q = forUser(userId);
 
@@ -38,10 +42,13 @@ export default async function ProjectPage({
       q.listMessages(id),
       q.getPendingApproval(id),
     ]);
-  const latestArtifact = artifacts[0] ?? null;
+  // Artifact versioning UI (P3): ?v= selects a version, newest by default.
+  const requestedVersion = Number(v);
+  const selectedArtifact =
+    artifacts.find((a) => a.version === requestedVersion) ?? artifacts[0] ?? null;
   // Content may live in object storage (P3) — resolve through the seam.
-  const latestArtifactContent = latestArtifact
-    ? await loadArtifactText(latestArtifact)
+  const selectedArtifactContent = selectedArtifact
+    ? await loadArtifactText(selectedArtifact)
     : null;
   const state = project.state as ProjectState;
   const gateState =
@@ -103,13 +110,25 @@ export default async function ProjectPage({
         </section>
 
         <section className="min-w-0 rounded-lg border p-5">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Artifact
-          </h2>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Artifact
+            </h2>
+            <ArtifactVersionPicker
+              projectId={project.id}
+              versions={artifacts.map((a) => a.version).sort((a, b) => a - b)}
+              selected={selectedArtifact?.version ?? 0}
+            />
+          </div>
           <ArtifactPreview
             artifact={
-              latestArtifact
-                ? { ...latestArtifact, content: latestArtifactContent }
+              selectedArtifact
+                ? {
+                    ...selectedArtifact,
+                    content: selectedArtifactContent,
+                    isBinary: isBinaryFilename(selectedArtifact.filename),
+                    downloadHref: `/api/projects/${project.id}/artifacts/${selectedArtifact.id}`,
+                  }
                 : null
             }
           />
