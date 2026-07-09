@@ -283,9 +283,19 @@ API constraints baked into the gateway:
   revision loop (max 10 rounds); budget gate. Gate dwell: 7 days — needs_input expires
   to the recommended default; budget expiry cancels. Deploy remains a manual step
   (Vercel + Inngest Cloud) when wanted; local dev uses `npm run dev:inngest`.
-- **P3 — router + tools + templates:** router config table + fallbacks; web search;
-  E2B sandbox; Build + Analyze templates; `context_items` service (pinned spec/decisions,
-  digests, rolling summary, token budgets); R2 artifact storage; artifact versioning UI.
+- **P3 — router + tools + templates (BUILT):** `model_routes` config table (seeded
+  from `lib/core/routes.ts`, fail-open validation, 60s cache) + one-shot model
+  fallback on overload; web search (`research_gather` phase, per-search cost
+  metered); E2B sandbox seam; Build + Analyze templates behind an Opus planner
+  (hard-validated, capability-gated plans; planning is the run's first durable
+  step); `context_items` service (pinned spec/decisions, digests, rolling summary
+  with `superseded_by`, chars/4 token budgets); R2 artifact storage seam
+  (inline-Postgres fallback for text); artifact versioning UI + download route;
+  kind-aware revisions. Deviations: E2B and R2 are env-gated and UNVERIFIED
+  against live services (no credentials yet) — without them, code artifacts ship
+  unverified (recorded as a system message) and Analyze degrades to a markdown
+  report; the planner never emits phases the environment can't run. Research
+  keeps its fixed plan (P2 stability); planner-driven research is deferred.
 - **P4 — verify + harden:** per-kind verification with one fix cycle; sandboxed iframe
   previews + sanitization; secret redaction on intake; SSRF guards on fetch tools;
   Clerk auth + `api_keys` (encrypted); per-user daily caps; cost estimates on plan cards;

@@ -2,9 +2,11 @@
 
 "Type what you want. Get a finished project, not a conversation."
 
-Phase 1 vertical slice: messy text → structured spec → approved plan → generated
-research report, with a full cost and event trail. See [PLAN.md](./PLAN.md) for
-scope and architecture.
+Messy text → structured spec → approved plan → a finished deliverable, with a
+full cost and event trail. Phase 3 added the model router, web search, the
+Build (code) and Analyze (spreadsheet) templates behind an LLM planner, the
+context service, and artifact versioning. See [PLAN.md](./PLAN.md) for scope
+and architecture.
 
 ## Setup
 
@@ -14,8 +16,25 @@ scope and architecture.
    cp .env.example .env.local
    ```
 
+   Required:
+
    - `DATABASE_URL` — a Neon Postgres connection string (free tier is fine)
    - `ANTHROPIC_API_KEY` — an Anthropic API key
+
+   Optional (Phase 3 capability gates — features degrade cleanly without
+   them and the degradation is recorded as a system message on the project):
+
+   - `E2B_API_KEY` — E2B sandbox. Without it, generated code is **not
+     executed** (artifacts are delivered unverified) and xlsx builds are
+     unavailable. Code NEVER runs in the app process either way.
+   - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+     `R2_BUCKET` — Cloudflare R2 object storage. Without it, text artifact
+     content stays inline in Postgres (fine for reports/code); binary
+     artifacts (xlsx) are unavailable.
+
+   > ⚠️ The R2 driver and E2B adapter have **not** been exercised against
+   > the live services yet (no credentials in this environment). First use
+   > with real keys should verify one run end to end.
 
 2. Apply the schema and seed the dev user:
 
@@ -54,6 +73,22 @@ scope and architecture.
    the approvals table before acting, so the recorded decision always wins
    over "no event arrived".
 
+## Phase 3 in one paragraph
+
+Intake maps the primary deliverable to a template: **report → research**
+(gather sources via web search → outline → draft), **code → build**,
+**spreadsheet → analyze**. Build/Analyze plans are produced by an Opus
+planner and hard-validated (allowed phase types per template, capability
+gating, exactly one artifact phase). Model choices live in the
+`model_routes` table (seeded from `src/lib/core/routes.ts`; invalid rows
+fail open to code defaults) with a one-shot fallback model on overload
+errors. Every run maintains `context_items` — pinned spec, recorded gate
+decisions, artifact digests, and a rolling summary — assembled under a
+token budget into revision/template prompts. Artifacts are versioned; the
+project page has a version picker and a download route, and revisions are
+kind-aware (reports re-draft, code gets a full-file revision, spreadsheets
+rebuild).
+
 ## Scripts
 
 | Script | What it does |
@@ -64,5 +99,5 @@ scope and architecture.
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run db:generate` | Regenerate migrations from `src/lib/db/schema.ts` |
 | `npm run db:migrate` | Apply migrations |
-| `npm run db:seed` | Insert the single dev user |
+| `npm run db:seed` | Insert the dev user + seed `model_routes` from the code registry |
 | `npm run check:gateway` | One cheap Haiku call through the gateway; asserts metering consistency |
