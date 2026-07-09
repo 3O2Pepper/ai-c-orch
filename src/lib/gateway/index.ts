@@ -180,6 +180,7 @@ export interface SearchTextResult extends TextResult {
 }
 
 const MAX_PAUSE_CONTINUATIONS = 5;
+const MAX_SOURCES = 20;
 
 /**
  * Text generation with the web_search server tool (P3). The API runs the
@@ -206,6 +207,11 @@ export async function generateTextWithSearch(
         const stream = client.messages.stream({
           model,
           max_tokens: call.maxTokens ?? 16000,
+          // The server-side search loop re-reads the growing context on
+          // every internal iteration — without caching that billed 373k
+          // uncached input tokens ($0.92) for one 8-search gather in live
+          // testing. Auto-caching turns those re-reads into 0.1x hits.
+          cache_control: { type: "ephemeral" },
           ...tuningParams(model, call.effort ?? "high"),
           ...(call.system ? { system: call.system } : {}),
           tools: [
@@ -236,13 +242,24 @@ export async function generateTextWithSearch(
         .join("");
       const seen = new Set<string>();
       const sources: SearchTextResult["sources"] = [];
+      const push = (url: string, title: string | null) => {
+        if (seen.has(url) || sources.length >= MAX_SOURCES) return;
+        seen.add(url);
+        sources.push({ url, title: title ?? url });
+      };
+      // Cited sources first (what the answer actually leaned on)...
       for (const b of blocks) {
         if (b.type !== "text" || !b.citations) continue;
         for (const c of b.citations) {
-          if (c.type !== "web_search_result_location" || seen.has(c.url)) continue;
-          seen.add(c.url);
-          sources.push({ url: c.url, title: c.title ?? c.url });
+          if (c.type === "web_search_result_location") push(c.url, c.title);
         }
+      }
+      // ...then raw search results. The dynamic-filtering tool variant can
+      // return text without citation metadata (observed live: 8 searches,
+      // 0 citations), so the tool results are the reliable source list.
+      for (const b of blocks) {
+        if (b.type !== "web_search_tool_result" || !Array.isArray(b.content)) continue;
+        for (const r of b.content) push(r.url, r.title);
       }
       return { result: { text, sources }, usage: total };
     });
