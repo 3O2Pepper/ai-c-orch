@@ -13,6 +13,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx src/lib/db/seed.ts",
     "check:gateway": "tsx scripts/check-gateway.ts",
+    "check:storage": "tsx scripts/check-storage.ts",
+    "check:sandbox": "tsx scripts/check-sandbox.ts",
     "dev:inngest": "npx inngest-cli@latest dev"
   },
   "dependencies": {
