@@ -27,7 +27,11 @@ import {
   XLSX_SCRIPT_SYSTEM,
   xlsxScriptPrompt,
 } from "@/lib/prompts/templates";
-import { runPythonInSandbox, sandboxConfigured } from "@/lib/sandbox";
+import {
+  checkPythonInSandbox,
+  runPythonInSandbox,
+  sandboxConfigured,
+} from "@/lib/sandbox";
 import { storageConfigured } from "@/lib/storage";
 import { loadArtifactText, storeArtifactBinary } from "./artifacts";
 import {
@@ -306,13 +310,19 @@ export async function runImplementPhase(
     { kind: "code", filename: safeName },
   );
 
-  // Verification (P3 level): smoke-run python in the sandbox when
-  // available; anything else is recorded as not-run, never faked.
+  // Verification (P3 level): compile-check python in the sandbox when
+  // available (kernel-executing arbitrary programs breaks CLI scripts —
+  // see checkPythonInSandbox); anything else is recorded as not-run,
+  // never faked. Behavioral verification with a fix cycle is P4.
   let verification: Record<string, unknown>;
   if (artifact.language.toLowerCase() === "python" && sandboxConfigured()) {
-    const run = await runPythonInSandbox({ code: artifact.code });
+    const run = await checkPythonInSandbox({
+      filename: safeName,
+      code: artifact.code,
+    });
     verification = {
       ran: true,
+      check: "py_compile",
       ok: run.ok,
       stdout: run.stdout.slice(-2000),
       stderr: run.stderr.slice(-2000),
@@ -345,8 +355,8 @@ export async function runImplementPhase(
     phaseId,
     `Implemented ${safeName} (${artifact.language}); ` +
       (verification.ran
-        ? `sandbox run ${verification.ok ? "passed" : "FAILED"}`
-        : "not executed"),
+        ? `sandbox compile check ${verification.ok ? "passed" : "FAILED"}`
+        : "not verified"),
     route.model,
     { usage_notes: artifact.usage_notes },
   );
