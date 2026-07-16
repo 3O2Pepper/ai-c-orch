@@ -6,10 +6,8 @@ import { Sandbox } from "@e2b/code-interpreter";
 // execution phases explicitly (recorded as events/messages), never fake a
 // result.
 //
-// NOT YET VERIFIED against the live E2B service: E2B_API_KEY is not
-// present in this environment. The adapter typechecks against
-// @e2b/code-interpreter 2.x; first use with a real key should run the
-// Build template end-to-end once before trusting results.
+// Verified against the live E2B service via `npm run check:sandbox` and
+// end-to-end Build/Analyze runs.
 
 export function sandboxConfigured(): boolean {
   return Boolean(process.env.E2B_API_KEY);

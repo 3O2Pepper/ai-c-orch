@@ -32,9 +32,9 @@ and architecture.
      content stays inline in Postgres (fine for reports/code); binary
      artifacts (xlsx) are unavailable.
 
-   > ⚠️ The R2 driver and E2B adapter have **not** been exercised against
-   > the live services yet (no credentials in this environment). First use
-   > with real keys should verify one run end to end.
+   Both integrations are verified against the live services (`npm run
+   check:storage`, `npm run check:sandbox`, plus end-to-end Build and
+   Analyze runs).
 
 2. Apply the schema and seed the dev user:
 
@@ -101,3 +101,5 @@ rebuild).
 | `npm run db:migrate` | Apply migrations |
 | `npm run db:seed` | Insert the dev user + seed `model_routes` from the code registry |
 | `npm run check:gateway` | One cheap Haiku call through the gateway; asserts metering consistency |
+| `npm run check:storage` | R2 round-trip (put/get/delete) through the storage seam |
+| `npm run check:sandbox` | E2B python run + output-file collection through the sandbox seam |

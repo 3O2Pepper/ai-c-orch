@@ -9,10 +9,8 @@ import {
 // content stays inline in Postgres (the P1/P2 path, lossless for text) and
 // binary-producing phases are gated off upstream.
 //
-// NOT YET VERIFIED against a live R2 bucket: R2_* credentials are not
-// present in this environment. The driver typechecks against the official
-// SDK; first use with real credentials should start with `npm run
-// check:storage`-style manual verification (see README).
+// Verified against a live R2 bucket via `npm run check:storage` and
+// end-to-end runs (text + binary artifacts).
 
 const REQUIRED_ENV = [
   "R2_ACCOUNT_ID",
