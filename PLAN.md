@@ -291,10 +291,12 @@ API constraints baked into the gateway:
   step); `context_items` service (pinned spec/decisions, digests, rolling summary
   with `superseded_by`, chars/4 token budgets); R2 artifact storage seam
   (inline-Postgres fallback for text); artifact versioning UI + download route;
-  kind-aware revisions. Deviations: E2B and R2 are env-gated and UNVERIFIED
-  against live services (no credentials yet) — without them, code artifacts ship
-  unverified (recorded as a system message) and Analyze degrades to a markdown
-  report; the planner never emits phases the environment can't run. Research
+  kind-aware revisions. E2B and R2 are env-gated and VERIFIED live
+  (check:sandbox / check:storage + end-to-end Build and Analyze runs, xlsx
+  included); without keys, code artifacts ship unverified (recorded as a
+  system message) and Analyze degrades to a markdown report — the planner
+  never emits phases the environment can't run. implement_code verification
+  is a sandbox py_compile check (behavioral verification is P4). Research
   keeps its fixed plan (P2 stability); planner-driven research is deferred.
 - **P4 — verify + harden:** per-kind verification with one fix cycle; sandboxed iframe
   previews + sanitization; secret redaction on intake; SSRF guards on fetch tools;
